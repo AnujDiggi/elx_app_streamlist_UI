@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import html
+import inspect
 from typing import TYPE_CHECKING
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 if TYPE_CHECKING:
     from streamlit.delta_generator import DeltaGenerator
 
 _CSS_INJECTED = False
+_JS_INJECTED = False
 _SIM_CTX_CSS_INJECTED = False
+_SELECTBOX_SUPPORTS_FILTER_MODE = "filter_mode" in inspect.signature(st.selectbox).parameters
 _FILTER_H = 32
 _FILTER_CTX_H = 36
-
 PRESET_OPTIONS: dict[str, list[str]] = {
     "Area": ["FR10", "FR20", "EA1", "DE01"],
     "Period": ["Jan", "EA2 · 2026", "EA1 · 2025", "EA2 · 2027"],
@@ -21,6 +24,23 @@ PRESET_OPTIONS: dict[str, list[str]] = {
     "Category": ["All", "STC", "PTC", "Warehouse"],
     "Bucket": ["All buckets", "Fixed", "Variable"],
     "Scenario": ["Base Case", "Optimistic", "Pessimistic"],
+    "Country": [
+        "🇫🇷 FR10 — France",
+        "🇪🇸 ES10 — Spain",
+        "🇮🇹 IT16 — Italy",
+        "🇵🇹 PT10 — Portugal",
+    ],
+    "Year": [
+        "📅 EA1 · 2026",
+        "📅 EA2 · 2026",
+        "📅 EA1 · 2025",
+        "📅 EA2 · 2027",
+    ],
+    "Business Area": ["Europe", "Americas", "APAC", "MEA"],
+    "Commercial Area": ["ATED", "EMEA", "NAFTA", "LATAM"],
+    "Panel Country": ["Germany", "France", "Spain", "Italy", "Portugal"],
+    "Panel Period": ["Last 6 months", "Last 3 months", "Last 12 months", "YTD", "Last month"],
+    "Panel Company": ["FR10", "ES10", "IT16", "PT10"],
 }
 
 
@@ -35,7 +55,7 @@ def inject_filter_select_css() -> None:
         f"""
         <style>
         /* Dashboard compact row — value only (not simulate labeled filters) */
-        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)) {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)):not(:has(.elx-filter-panel)) {{
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
@@ -46,7 +66,7 @@ def inject_filter_select_css() -> None:
             align-self: center !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)) > div[data-testid="stVerticalBlock"] {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)):not(:has(.elx-filter-panel)) > div[data-testid="stVerticalBlock"] {{
             width: 100% !important;
             gap: 0 !important;
             justify-content: center !important;
@@ -57,27 +77,151 @@ def inject_filter_select_css() -> None:
             display: none !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd) [data-testid="stSelectbox"] {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-panel)) [data-testid="stSelectbox"] {{
             width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-panel)) div[data-baseweb="select"] {{
             width: 100% !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)) div[data-baseweb="select"] > div {{
+        [data-testid="column"]:has(.elx-filter-panel) {{
+            min-width: 0 !important;
+            overflow: visible !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-panel) > div[data-testid="stVerticalBlock"] {{
+            width: 100% !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-panel) [data-testid="stSelectbox"],
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"],
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div {{
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            overflow: visible !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div {{
+            background-color: #E9EDF5 !important;
+            border: 1px solid #D4DBE6 !important;
+            border-radius: 8px !important;
+            min-height: {h}px !important;
+            height: {h}px !important;
+            color: #4B5563 !important;
+            box-shadow: none !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div > div,
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] span,
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] [data-testid="stMarkdownContainer"],
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] p {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            text-align: left !important;
+            width: auto !important;
+            min-width: 0 !important;
+            max-width: none !important;
+            min-height: {h}px !important;
+            height: {h}px !important;
+            padding: 0 28px 0 10px !important;
+            color: #4B5563 !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+            white-space: nowrap !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] svg {{
+            fill: #6B7280 !important;
+            color: #6B7280 !important;
+        }}
+
+        /* Simulate panel header — labeled navy dropdowns */
+        [data-testid="column"]:has(.elx-filter-panel-labeled) > div[data-testid="stVerticalBlock"] {{
+            width: 100% !important;
+            gap: 4px !important;
+        }}
+        [data-testid="column"]:has(.elx-filter-panel-labeled) .elx-filter-upper-lbl,
+        [class*="st-key-sim_panel_header_wrap"] .elx-filter-upper-lbl,
+        [class*="st-key-sim_panel_header_wrap"] .elx-filter-panel-lbl,
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stMarkdownContainer"]:has(.elx-filter-upper-lbl),
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stMarkdownContainer"]:has(.elx-filter-upper-lbl) p {{
+            display: block !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            letter-spacing: 0 !important;
+            text-transform: none !important;
+            margin: 0 0 4px 2px !important;
+            padding: 0 !important;
+            line-height: 1.3 !important;
+            white-space: nowrap !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+        }}
+        [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] > div {{
+            background-color: rgba(255, 255, 255, 0.12) !important;
+            border: 1px solid rgba(255, 255, 255, 0.22) !important;
+            border-radius: 4px !important;
+            min-height: {h}px !important;
+            height: {h}px !important;
+            color: #ffffff !important;
+            box-shadow: none !important;
+        }}
+        [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] > div > div,
+        [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] span,
+        [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] p,
+        [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] [data-testid="stMarkdownContainer"] {{
+            color: #ffffff !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+        }}
+        [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] svg {{
+            fill: #ffffff !important;
+            color: #ffffff !important;
+        }}
+
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] > div {{
+            background-color: rgba(255, 255, 255, 0.12) !important;
+            border: 1px solid rgba(255, 255, 255, 0.22) !important;
+            border-radius: 4px !important;
+            min-height: {h}px !important;
+            height: {h}px !important;
+            color: #ffffff !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] > div > div,
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] span,
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] p,
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] [data-testid="stMarkdownContainer"] {{
+            color: #ffffff !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] svg {{
+            fill: #ffffff !important;
+            color: #ffffff !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)):not(:has(.elx-filter-panel)) div[data-baseweb="select"] > div {{
             background-color: #F8F9FC !important;
             border: 1px solid #D8DCE7 !important;
-            border-radius: 6px !important;
+            border-radius: 4px !important;
             min-height: {h}px !important;
             height: {h}px !important;
             color: #011E41 !important;
             box-shadow: none !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)) div[data-baseweb="select"] > div > div {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)):not(:has(.elx-filter-panel)) div[data-baseweb="select"] > div > div {{
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
@@ -92,14 +236,14 @@ def inject_filter_select_css() -> None:
             line-height: 1 !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)) div[data-baseweb="select"] span {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)):not(:has(.elx-filter-panel)) div[data-baseweb="select"] span {{
             color: #011E41 !important;
             font-size: 12px !important;
             font-weight: 600 !important;
             text-align: center !important;
         }}
 
-        [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] svg {{
+        [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-panel)) div[data-baseweb="select"] svg {{
             fill: #011E41 !important;
             color: #011E41 !important;
         }}
@@ -107,9 +251,67 @@ def inject_filter_select_css() -> None:
         [data-testid="column"]:has(.elx-filter-dd) .elx-filter-slot {{
             display: none !important;
         }}
+
+        /* Select-only dropdowns — pointer cursor, no text caret */
+        [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"],
+        [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] > div,
+        [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] input {{
+            cursor: pointer !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] input {{
+            caret-color: transparent !important;
+            user-select: none !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def inject_filter_select_js() -> None:
+    """Lock filter dropdowns to select-only and apply pointer cursor (older Streamlit fallback)."""
+    global _JS_INJECTED
+    if _JS_INJECTED:
+        return
+    _JS_INJECTED = True
+    components.html(
+        """
+        <script>
+        (function () {
+          const doc = window.parent?.document || document;
+          function lockFilterSelects() {
+            doc.querySelectorAll(
+              '[data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"]'
+            ).forEach((selectRoot) => {
+              selectRoot.style.setProperty("cursor", "pointer", "important");
+              const trigger = selectRoot.querySelector(":scope > div");
+              if (trigger) trigger.style.setProperty("cursor", "pointer", "important");
+            });
+            doc.querySelectorAll(
+              '[data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] input'
+            ).forEach((input) => {
+              input.setAttribute("readonly", "true");
+              input.setAttribute("inputmode", "none");
+              input.style.setProperty("cursor", "pointer", "important");
+              input.style.setProperty("caret-color", "transparent", "important");
+              if (input.dataset.elxSelectGuard) return;
+              input.dataset.elxSelectGuard = "1";
+              input.addEventListener("keydown", (e) => {
+                const nav = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "Tab", "Home", "End"];
+                if (nav.includes(e.key)) return;
+                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
+                if (e.key === "Backspace" || e.key === "Delete") e.preventDefault();
+              });
+            });
+          }
+          lockFilterSelects();
+          const obs = new MutationObserver(lockFilterSelects);
+          if (doc.body) obs.observe(doc.body, { childList: true, subtree: true });
+        })();
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -169,10 +371,16 @@ def inject_simulate_context_css() -> None:
             max-width: 100% !important;
             margin-left: 0 !important;
             margin-right: 0 !important;
-            padding: 10px 20px !important;
+            padding: 12px 20px 10px !important;
+            min-height: 58px !important;
             flex-wrap: nowrap !important;
             align-items: flex-end !important;
             gap: 12px !important;
+            overflow: visible !important;
+        }}
+
+        [data-testid="stElementContainer"]:has([data-testid="stHorizontalBlock"]:has(.sim-ctx-marker)),
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"] {{
             overflow: visible !important;
         }}
 
@@ -232,6 +440,29 @@ def inject_simulate_context_css() -> None:
         }}
 
         /* Labeled filter_select inside CONTEXT bar */
+        [data-testid="column"]:has(.elx-filter-labeled):has(.elx-filter-dd) {{
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            align-self: flex-end !important;
+        }}
+
+        [data-testid="column"]:has(.elx-filter-labeled) > div[data-testid="stVerticalBlock"] {{
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            gap: 4px !important;
+        }}
+
+        [data-testid="stElementContainer"]:has(.elx-filter-upper-lbl),
+        [data-testid="stElementContainer"]:has(.elx-filter-upper-lbl) [data-testid="stMarkdownContainer"] {{
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+
         [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx),
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) {{
             height: auto !important; min-height: 0 !important; max-height: none !important;
@@ -246,10 +477,19 @@ def inject_simulate_context_css() -> None:
             width: 100% !important; gap: 4px !important; margin: 0 !important; padding: 0 !important;
             background: #ffffff !important;
         }}
-        [data-testid="stElementContainer"]:has(.sim-ctx-marker) .elx-filter-upper-lbl {{
-            font-size: 10px; font-weight: 700; color: #6b7280;
-            letter-spacing: 0.05em; text-transform: uppercase;
-            margin: 0 0 0 2px; line-height: 1.1;
+        [data-testid="stElementContainer"]:has(.sim-ctx-marker) .elx-filter-upper-lbl,
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) .elx-filter-upper-lbl {{
+            display: block !important;
+            font-size: 10px !important;
+            font-weight: 700 !important;
+            color: #6b7280 !important;
+            letter-spacing: 0.05em !important;
+            text-transform: uppercase !important;
+            margin: 0 0 4px 2px !important;
+            padding: 0 !important;
+            line-height: 1.3 !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
         }}
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) [data-testid="stWidgetLabel"] {{
             display: none !important;
@@ -267,7 +507,7 @@ def inject_simulate_context_css() -> None:
         }}
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) div[data-baseweb="select"] > div {{
             border: 1px solid #d8dce7 !important;
-            border-radius: 6px !important;
+            border-radius: 4px !important;
             min-height: {h}px !important;
             height: {h}px !important;
             color: #011e41 !important;
@@ -289,9 +529,26 @@ def inject_simulate_context_css() -> None:
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) div[data-baseweb="select"] svg {{
             fill: #011e41 !important;
         }}
-        [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:last-child {{
-            display: flex !important; justify-content: flex-end !important;
-            align-items: center !important; background: #ffffff !important;
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child {{
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
+            align-self: center !important;
+            background: #ffffff !important;
+            margin-left: auto !important;
+        }}
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child > div[data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child [data-testid="stElementContainer"]:has(.sim-ctx-live),
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child [data-testid="stMarkdownContainer"]:has(.sim-ctx-live) {{
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) .sim-ctx-live {{
+            margin-left: auto !important;
         }}
 
         /* Flush white CONTEXT bar directly under navy navbar */
@@ -338,7 +595,7 @@ def render_simulate_context_bar(
 
     n = len(context_rows)
     ratios = [0.48, 0.035] + [1.0] * n + [1.55]
-    cols = st.columns(ratios, gap="small", vertical_alignment="center")
+    cols = st.columns(ratios, gap="small", vertical_alignment="bottom")
 
     # Marker inside columns row (same pattern as dashboard dash-filters-marker).
     page_id = ' id="simulate-page"' if page_marker else ""
@@ -402,6 +659,7 @@ def filter_select(
     parent: DeltaGenerator | None = None,
     label_above: str | None = None,
     context_bar: bool = False,
+    panel_header: bool = False,
 ) -> str:
     """One compact dropdown showing the selected value only (Figma top row).
 
@@ -420,6 +678,7 @@ def filter_select(
         Selected value string.
     """
     inject_filter_select_css()
+    inject_filter_select_js()
 
     opts = resolve_options(options, preset=preset, default=default)
     if not opts:
@@ -434,21 +693,35 @@ def filter_select(
         opts = [selected, *opts]
 
     target = parent if parent is not None else st
-    if context_bar or label_above:
+    if panel_header:
+        panel_cls = "elx-filter-panel elx-filter-panel-labeled" if label_above else "elx-filter-panel"
+        target.markdown(f'<span class="{panel_cls}" aria-hidden="true"></span>', unsafe_allow_html=True)
+    if context_bar or (label_above and not panel_header):
         target.markdown('<span class="elx-filter-ctx elx-filter-labeled" aria-hidden="true"></span>', unsafe_allow_html=True)
     if label_above:
-        target.markdown(
-            f'<div class="elx-filter-upper-lbl">{html.escape(label_above)}</div>',
-            unsafe_allow_html=True,
-        )
+        if panel_header:
+            target.markdown(
+                f'<div class="elx-filter-upper-lbl elx-filter-panel-lbl" '
+                f'style="color:#ffffff;display:block;font-size:11px;font-weight:600;'
+                f'margin:0 0 4px 2px;line-height:1.3;white-space:nowrap;">'
+                f'{html.escape(label_above)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            target.markdown(
+                f'<div class="elx-filter-upper-lbl">{html.escape(label_above)}</div>',
+                unsafe_allow_html=True,
+            )
     target.markdown('<span class="elx-filter-dd" aria-hidden="true"></span>', unsafe_allow_html=True)
-    target.selectbox(
-        "\u200b",
-        options=opts,
-        index=opts.index(selected),
-        key=key,
-        label_visibility="collapsed",
-    )
+    select_kwargs: dict = {
+        "options": opts,
+        "index": opts.index(selected),
+        "key": key,
+        "label_visibility": "collapsed",
+    }
+    if _SELECTBOX_SUPPORTS_FILTER_MODE:
+        select_kwargs["filter_mode"] = None
+    target.selectbox("\u200b", **select_kwargs)
 
     return str(st.session_state[key])
 

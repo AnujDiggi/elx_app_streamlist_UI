@@ -244,7 +244,7 @@ div[data-testid="stButton"] button:hover{
     background:#ffffff !important;
     color:#011E41 !important;
     border:1px solid #E5E7EB !important;
-    border-radius:8px !important;
+    border-radius:0 !important;
     font-weight:600 !important;
     font-size:13px !important;
     min-height:42px !important;
@@ -267,7 +267,7 @@ div[data-testid="stButton"] button:hover{
     background:#011E41 !important;
     color:#ffffff !important;
     border:none !important;
-    border-radius:8px !important;
+    border-radius:0 !important;
     font-weight:600 !important;
     font-size:13px !important;
     min-height:42px !important;
@@ -359,7 +359,25 @@ input{
     background:#ffffff !important;
     background-color:#ffffff !important;
     border:1px solid #C3C3C3 !important;
-    border-radius:10px !important;
+    border-radius:0 !important;
+}
+
+.block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"],
+.block-container:has(#simulate-page) [class*="st-key-sim_grp_"],
+.block-container:has(#simulate-page) [class*="st-key-sim_save_"] button,
+.block-container:has(#simulate-page) [class*="st-key-sim_toggle_"] button,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-save-col) div[data-testid="stButton"] button,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-toggle-col) div[data-testid="stButton"] button,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stHorizontalBlock"],
+.block-container:has(#simulate-page) [data-testid="stTextInput"] input,
+.block-container:has(#simulate-page) [data-testid="stTextInput"] > div{
+    border-radius:0 !important;
+}
+
+.block-container:has(#simulate-page) [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.elx-filter-dd) div[data-baseweb="select"] > div,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.elx-filter-ctx) div[data-baseweb="select"] > div{
+    border-radius:4px !important;
 }
 
 /* ------------------------------------------------ */

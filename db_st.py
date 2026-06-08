@@ -202,6 +202,231 @@ def get_dashboard_data(user_name: str) -> dict:
 # Simulate
 # ---------------------------------------------------------------------------
 
+_SIM_GROUPS_WITHOUT_FIELD_DESC = frozenset({
+    "Delivery Mix", "Direct Delivery", "Inflation Rates", "Process cost", "Project Costs (EUR)",
+})
+_SIM_EXCLUDED_GROUPS = frozenset({"Warehouse Costs (SWC)"})
+_SIM_GROUP_TITLE_ALIASES = {
+    "Project Costs (EUR)": "Process cost",
+    "Delivery Mix": "Direct Delivery",
+}
+_DIRECT_DELIVERY_DB_TITLES = frozenset({"Delivery Mix", "Direct Delivery"})
+_DELIVERY_MIX_ENTRIES: tuple[tuple[str, str], ...] = (
+    ("France (FR10)", "FR10"),
+    ("Spain (ES10)", "ES10"),
+    ("Italy (IT16)", "IT16"),
+    ("Portugal (PT10)", "PT10"),
+)
+_DELIVERY_MIX_DD_CHANGE = {"FR10": 10, "ES10": 30, "IT16": 5, "PT10": 0}
+
+
+def _delivery_mix_fields() -> list[dict]:
+    return [
+        {
+            "name": label,
+            "name_tags": [],
+            "desc": "",
+            "dd_change": _DELIVERY_MIX_DD_CHANGE[code],
+            "value": 0,
+            "min": 0,
+            "max": 100,
+            "step": None,
+            "suffix": "%",
+        }
+        for label, code in _DELIVERY_MIX_ENTRIES
+    ]
+
+
+_PROCESS_COST_DB_TITLES = frozenset({"Process cost", "Project Costs (EUR)"})
+_PROCESS_COST_SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("PTC", "ptc", (
+        "New set-up / business",
+        "Primary / direct freight price",
+        "Ocean",
+        "Other",
+    )),
+    ("STC", "stc", (
+        "Secondary freight price",
+        "Secondary freight efficiency",
+        "D2C freight efficiency",
+        "Direct effect",
+        "Other variable",
+    )),
+    ("SWC Variable", "swc", (
+        "Indirect labour price",
+        "Other price WH VAR",
+        "Warehouse var efficiency",
+        "Other variable",
+        "Op. exchange rates",
+    )),
+)
+
+
+def _process_cost_field(
+    name: str,
+    *,
+    section: bool = False,
+    section_class: str = "",
+) -> dict:
+    return {
+        "name": name,
+        "name_tags": [],
+        "desc": "",
+        "field_role": "section" if section else "input",
+        "section_class": section_class,
+        "value": 0,
+        "min": 0,
+        "max": 100,
+        "step": None,
+        "suffix": "%",
+    }
+
+
+def _process_cost_fields() -> list[dict]:
+    fields: list[dict] = []
+    for section_name, section_class, items in _PROCESS_COST_SECTIONS:
+        fields.append(_process_cost_field(section_name, section=True, section_class=section_class))
+        for item_name in items:
+            fields.append(_process_cost_field(item_name))
+    return fields
+
+
+_INFLATION_VECTOR = (2.0, 3.0, 5.0, 2.0, -1.0, 2.0)
+_INFLATION_IMPACT_WEIGHTS = {
+    "PTC": (0, 0, 25, 70, 0, 0),
+    "STC": (30, 70, 0, 0, 0, 0),
+    "SWC var": (0, 0, 0, 0, 100, 0),
+    "SWC fixed": (0, 0, 0, 0, 0, 100),
+    "SWC Obs. fix.": (0, 0, 0, 0, 0, 0),
+}
+
+
+def _inflation_baseline_total(impact: tuple[int, ...]) -> float:
+    cells = [round(_INFLATION_VECTOR[i] * impact[i] / 100, 1) for i in range(len(_INFLATION_VECTOR))]
+    return round(sum(cells), 1)
+
+
+def _impact_row_total(impact: tuple[int, ...]) -> float:
+    return float(sum(impact))
+
+
+def _inflation_field_spec(
+    name: str,
+    *,
+    role: str,
+    baseline: float,
+    impact: tuple[int, ...] = (),
+    name_tags: list[dict] | None = None,
+) -> dict:
+    return {
+        "name": name,
+        "name_tags": name_tags or [],
+        "desc": "",
+        "infl_role": role,
+        "infl_baseline": baseline,
+        "impact": list(impact),
+        "value": 0.0,
+        "min": None,
+        "max": None,
+        "step": 0.1,
+        "suffix": "%",
+    }
+
+
+def _simulation_summary_rows() -> list[dict]:
+    return [
+        {"name": "Current", "sq": "red", "value": "€42.3k", "value_class": "red"},
+        {"name": "Baseline", "sq": "blue", "value": "€30.5k", "value_class": "green"},
+        {"name": "Difference", "sq": "orange", "value": "+€12.3k", "value_class": "red"},
+        {"name": "Difference%", "sq": "blue", "value": "41.5%", "value_class": "neutral"},
+    ]
+
+
+def _inflation_rates_fields() -> list[dict]:
+    ptc_w = _INFLATION_IMPACT_WEIGHTS["PTC"]
+    stc_w = _INFLATION_IMPACT_WEIGHTS["STC"]
+    swc_var_w = _INFLATION_IMPACT_WEIGHTS["SWC var"]
+    swc_fix_w = _INFLATION_IMPACT_WEIGHTS["SWC fixed"]
+    swc_obs_w = _INFLATION_IMPACT_WEIGHTS["SWC Obs. fix."]
+    return [
+        _inflation_field_spec(
+            "inflation",
+            role="input",
+            baseline=round(sum(_INFLATION_VECTOR), 1),
+        ),
+        _inflation_field_spec(
+            "PTC impact",
+            role="impact",
+            baseline=_impact_row_total(ptc_w),
+            impact=ptc_w,
+            name_tags=[{"text": "PTC", "class": "ptc"}],
+        ),
+        _inflation_field_spec(
+            "STC impact",
+            role="impact",
+            baseline=_impact_row_total(stc_w),
+            impact=stc_w,
+            name_tags=[{"text": "STC", "class": "stc"}],
+        ),
+        _inflation_field_spec(
+            "SWC var impact",
+            role="impact",
+            baseline=_impact_row_total(swc_var_w),
+            impact=swc_var_w,
+            name_tags=[{"text": "SWC", "class": "swc"}],
+        ),
+        _inflation_field_spec(
+            "SWC fixed impact",
+            role="impact",
+            baseline=_impact_row_total(swc_fix_w),
+            impact=swc_fix_w,
+            name_tags=[{"text": "SWC", "class": "swc"}],
+        ),
+        _inflation_field_spec(
+            "SWC Obs. fix. Impact",
+            role="impact",
+            baseline=_impact_row_total(swc_obs_w),
+            impact=swc_obs_w,
+            name_tags=[{"text": "SWC", "class": "swc"}],
+        ),
+        _inflation_field_spec(
+            "PTC",
+            role="calculated",
+            baseline=_inflation_baseline_total(ptc_w),
+            impact=ptc_w,
+            name_tags=[{"text": "PTC", "class": "ptc"}],
+        ),
+        _inflation_field_spec(
+            "STC",
+            role="calculated",
+            baseline=_inflation_baseline_total(stc_w),
+            impact=stc_w,
+            name_tags=[{"text": "STC", "class": "stc"}],
+        ),
+        _inflation_field_spec(
+            "SWC var",
+            role="calculated",
+            baseline=_inflation_baseline_total(swc_var_w),
+            impact=swc_var_w,
+            name_tags=[{"text": "SWC", "class": "swc"}],
+        ),
+        _inflation_field_spec(
+            "SWC fixed",
+            role="calculated",
+            baseline=_inflation_baseline_total(swc_fix_w),
+            impact=swc_fix_w,
+            name_tags=[{"text": "SWC", "class": "swc"}],
+        ),
+        _inflation_field_spec(
+            "SWC Obs. fix.",
+            role="calculated",
+            baseline=_inflation_baseline_total(swc_obs_w),
+            impact=swc_obs_w,
+            name_tags=[{"text": "SWC", "class": "swc"}],
+        ),
+    ]
+
+
 def get_simulate_data() -> dict:
     meta = _one_required(
         "SELECT live_label, params_title, params_sub, expander_text,"
@@ -224,30 +449,53 @@ def get_simulate_data() -> dict:
     for g_row in _rows(
         "SELECT id, icon, title, description, expanded FROM simulate_param_groups ORDER BY sort_order"
     ):
+        if g_row["title"] in _SIM_EXCLUDED_GROUPS:
+            continue
         gid = g_row["id"]
-        tags = [{"text": t["text"], "class": t["class"]}
-                for t in _rows('SELECT "text", "class" FROM simulate_param_group_tags WHERE group_id = ? ORDER BY sort_order', gid)]
-        fields = []
-        for f_row in _rows(
-            'SELECT id, name, description, "value", min_value, max_value, step, suffix'
-            " FROM simulate_param_fields WHERE group_id = ? ORDER BY sort_order",
-            gid,
-        ):
-            name_tags = [{"text": t["text"], "class": t["class"]}
-                         for t in _rows('SELECT "text", "class" FROM simulate_param_field_name_tags WHERE field_id = ? ORDER BY sort_order', f_row["id"])]
-            fields.append({
-                "name":      f_row["name"],
-                "name_tags": name_tags,
-                "desc":      f_row["description"],
-                "value":     f_row["value"],
-                "min":       f_row["min_value"],
-                "max":       f_row["max_value"],
-                "step":      f_row["step"],
-                "suffix":    f_row["suffix"],
-            })
+        hide_field_desc = g_row["title"] in _SIM_GROUPS_WITHOUT_FIELD_DESC
+        if g_row["title"] in _DIRECT_DELIVERY_DB_TITLES:
+            tags = [{"text": "DD%", "class": "dd"}, {"text": "4 fields", "class": "fields"}]
+            fields = _delivery_mix_fields()
+        elif g_row["title"] == "Inflation Rates":
+            tags = [
+                {"text": "STC", "class": "stc"},
+                {"text": "PTC", "class": "ptc"},
+                {"text": "6 fields", "class": "fields"},
+            ]
+            fields = _inflation_rates_fields()
+        elif g_row["title"] in _PROCESS_COST_DB_TITLES:
+            tags = [
+                {"text": "PTC", "class": "ptc"},
+                {"text": "STC", "class": "stc"},
+                {"text": "14 fields", "class": "fields"},
+            ]
+            fields = _process_cost_fields()
+        else:
+            tags = [{"text": t["text"], "class": t["class"]}
+                    for t in _rows('SELECT "text", "class" FROM simulate_param_group_tags WHERE group_id = ? ORDER BY sort_order', gid)]
+            fields = []
+            for f_row in _rows(
+                'SELECT id, name, description, "value", min_value, max_value, step, suffix'
+                " FROM simulate_param_fields WHERE group_id = ? ORDER BY sort_order",
+                gid,
+            ):
+                name_tags = [{"text": t["text"], "class": t["class"]}
+                             for t in _rows('SELECT "text", "class" FROM simulate_param_field_name_tags WHERE field_id = ? ORDER BY sort_order', f_row["id"])]
+                is_int_field = f_row["max_value"] is not None and f_row["step"] is None
+                fields.append({
+                    "name":      f_row["name"],
+                    "name_tags": name_tags,
+                    "desc":      "" if hide_field_desc else f_row["description"],
+                    "value":     0 if is_int_field else 0.0,
+                    "min":       f_row["min_value"],
+                    "max":       f_row["max_value"],
+                    "step":      f_row["step"],
+                    "suffix":    f_row["suffix"],
+                })
+        title = _SIM_GROUP_TITLE_ALIASES.get(g_row["title"], g_row["title"])
         param_groups.append({
             "icon":     g_row["icon"],
-            "title":    g_row["title"],
+            "title":    title,
             "desc":     g_row["description"],
             "tags":     tags,
             "expanded": bool(g_row["expanded"]),
@@ -282,6 +530,11 @@ def get_simulate_data() -> dict:
             "sub":      meta["impact_sub"],
             "note":     meta["impact_note"],
             "rows":     impact_rows,
+        },
+        "summary": {
+            "title": "Simulation Summary",
+            "badge": "Real-time",
+            "rows":  _simulation_summary_rows(),
         },
         "status_summary": meta["status_summary"],
         "status_rows":    status_rows,

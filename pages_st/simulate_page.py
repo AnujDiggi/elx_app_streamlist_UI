@@ -5,7 +5,6 @@ import streamlit as st
 
 import db_st
 from pages_st.Common_Pages.simulate_ui import (
-    dash_spacer,
     init_simulate_state,
     inject_css,
     inject_paint_js,
@@ -15,7 +14,8 @@ from pages_st.Common_Pages.simulate_ui import (
     render_parameter_panel_header,
     render_simulate_context_bar,
     render_simulate_sidebar,
-    render_stepper,
+    # dash_spacer,
+    # render_stepper,
 )
 
 
@@ -39,8 +39,9 @@ def _render_main_section(data: dict, groups: list) -> None:
             '<span class="sim-content-section-marker" aria-hidden="true"></span>',
             unsafe_allow_html=True,
         )
-        main_l, main_r = st.columns([1.58, 1], gap="medium")
+        main_l, main_r = st.columns([3, 1], gap="small")
         with main_l:
+            st.markdown('<span class="sim-main-panel-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
             _render_form_panel(data, groups)
         with main_r:
             render_simulate_sidebar(data, groups)
@@ -65,8 +66,8 @@ def render() -> None:
     with page_body:
         st.markdown('<span class="sim-page-body-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
 
-        render_stepper(data["steps"])
-        dash_spacer()
+        # render_stepper(data["steps"])
+        # dash_spacer()
         _render_main_section(data, groups)
 
     # Run after all widgets mount so number-input layout paints correctly on first visit.
