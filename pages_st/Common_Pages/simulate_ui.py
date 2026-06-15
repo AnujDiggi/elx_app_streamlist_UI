@@ -10,6 +10,7 @@ from urllib.parse import quote, unquote
 import streamlit as st
 import streamlit.components.v1 as components
 
+import db_st
 from pages_st.Common_Pages.filter_bar import render_context_filter_bar as _render_context_bar
 from pages_st.Common_Pages.filter_select import filter_select
 
@@ -32,6 +33,7 @@ _MAIN_COL_GAP = "16px"
 _SUBMIT_SECTION_PAD = "8px 12px"
 _INPUT_BG = "#F9F9F9"
 _INPUT_BORDER = "#D4DBE6"
+_INPUT_RADIUS = "8px"
 _TEXT = "#111827"
 _TEXT_MUTED = "#6B7280"
 _SAVE_BTN_BG = "#DCE8F2"
@@ -50,7 +52,19 @@ _TAG = {
     "entered": ("#fef3c7", "#b45309"),
 }
 
-_CSS_LOADED = False
+_INFL_CSS_VERSION = 32
+_PCT_CHIP_MIN_W = "76px"
+_PCT_CHIP_MAX_W = "100px"
+_PCT_CHIP_H = "40px"
+_PCT_CHIP_PAD = "0 10px"
+_PCT_CHIP_GAP = "4px"
+_PC_CHIP_MIN_W = "84px"
+_PC_CHIP_MAX_W = "108px"
+_PC_CHIP_H = "36px"
+_PC_TOTAL_ROW_H = "44px"
+_PC_TOTAL_BG = "#E8EEF7"
+_INFL_PCT_CHIP_MIN_W = _PCT_CHIP_MIN_W
+_INFL_PCT_CHIP_MAX_W = _PCT_CHIP_MAX_W
 
 _PANEL_SCOPE_TREE: dict[str, list[str]] = {
     "BA": ["FR10", "FR20", "EA1", "DE01"],
@@ -84,6 +98,17 @@ _PANEL_HEADER_FILTERS: tuple[dict[str, str], ...] = (
     {"label": "Period", "key": "sim_panel_period", "preset": "Panel Period", "default": "Last 6 months"},
     {"label": "Company", "key": "sim_panel_company", "preset": "Panel Company", "default": "FR10"},
 )
+_PANEL_COMPANY_KEY = "sim_panel_company"
+
+
+def _selected_panel_company() -> str:
+    """Company code from the panel header Company dropdown."""
+    default = "FR10"
+    for spec in _PANEL_HEADER_FILTERS:
+        if spec["key"] == _PANEL_COMPANY_KEY:
+            default = spec["default"]
+            break
+    return str(st.session_state.get(_PANEL_COMPANY_KEY, default))
 
 
 def _html(fragment: str) -> None:
@@ -318,6 +343,7 @@ def inject_simulate_layout_css() -> None:
             background: #F9F9F9 !important;
             border: 1px solid #D4DBE6 !important;
             border-radius: 8px !important;
+            overflow: hidden !important;
             padding: 0 12px 0 12px !important;
             min-height: 40px !important;
             height: 40px !important;
@@ -354,21 +380,47 @@ def inject_simulate_layout_css() -> None:
         [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stWidgetLabel"] {
             display: none !important;
         }
+        [data-testid="column"]:has(.sim-pct-chip-row) div[data-baseweb="input"] {
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            min-height: 38px !important;
+            height: 38px !important;
+            min-width: 44px !important;
+            width: auto !important;
+            box-shadow: none !important;
+        }
+        [data-testid="column"]:has(.sim-pct-chip-row) div[data-baseweb="input"] > div {
+            min-height: 38px !important;
+            height: 38px !important;
+            display: flex !important;
+            align-items: center !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        [data-testid="column"]:has(.sim-pct-chip-row) div[data-baseweb="input"] input,
         [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stTextInput"] input {
             text-align: left !important;
             font-weight: 700 !important;
             font-size: 14px !important;
             color: #011E41 !important;
             border: none !important;
+            border-radius: 0 !important;
             background: transparent !important;
             box-shadow: none !important;
             outline: none !important;
-            min-height: 36px !important;
-            height: 36px !important;
+            min-height: 38px !important;
+            height: 38px !important;
             width: 52px !important;
             min-width: 44px !important;
             max-width: 72px !important;
             padding: 0 !important;
+        }
+        [data-testid="column"]:has(.sim-pct-chip-row) div[data-baseweb="input"]:focus-within {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
         }
         [data-testid="column"]:has(.sim-pct-chip-row) .sim-pct-chip-suffix,
         [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stMarkdownContainer"]:has(.sim-pct-chip-suffix) p {
@@ -391,18 +443,14 @@ def inject_simulate_layout_css() -> None:
 
 
 def inject_css() -> None:
-    """Inject all simulate-page styles (call once per session)."""
-    global _CSS_LOADED
-    if _CSS_LOADED:
-        return
-    _CSS_LOADED = True
+    """Inject simulate-page styles on every rerun (Streamlit rebuilds DOM each run)."""
     import pages_st.Common_Pages.filter_select as _fs
 
     _fs._CSS_INJECTED = False
     _fs._SIM_CTX_CSS_INJECTED = False
     st.markdown(
         f"""
-        <style>
+        <style id="sim-page-css-v{_INFL_CSS_VERSION}">
         .block-container:has(#simulate-page) {{
             padding: 0 0 16px 0 !important;
             max-width: 100% !important;
@@ -803,7 +851,8 @@ def inject_css() -> None:
             background: #ffffff !important;
         }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap) [data-testid="stElementContainer"]:has(.sim-field-row-marker)
-        > [data-testid="stHorizontalBlock"] {{
+        + [data-testid="stHorizontalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) {{
             padding: 0 !important;
             margin: 0 !important;
             align-items: center !important;
@@ -811,8 +860,53 @@ def inject_css() -> None:
             background: #ffffff !important;
             box-sizing: border-box !important;
         }}
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap) [data-testid="stElementContainer"]:has(.sim-field-row-marker):last-of-type
-        > [data-testid="stHorizontalBlock"] {{
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stElementContainer"]:has(.sim-field-row-last)
+        + [data-testid="stHorizontalBlock"] {{
+            border-bottom: none !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker):not(:has(.sim-section-header-marker)),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker):not(:has(.sim-section-header-marker)) {{
+            margin: 0 !important;
+            padding: 10px !important;
+            gap: 8px !important;
+            align-items: center !important;
+            background: #ffffff !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+        }}
+        hr.sim-dd-row-divider,
+        div.sim-dd-row-divider {{
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            border-top: 1px solid #000000 !important;
+            background: transparent !important;
+            box-sizing: border-box !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stElementContainer"]:has(.sim-dd-row-divider),
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stMarkdownContainer"]:has(.sim-dd-row-divider),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stElementContainer"]:has(.sim-dd-row-divider),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stMarkdownContainer"]:has(.sim-dd-row-divider) {{
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stElementContainer"]:has(.sim-field-row-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stElementContainer"]:has(.sim-field-row-marker) {{
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap):not(:has(.sim-delivery-mix-wrap)) [data-testid="stElementContainer"]:has(.sim-field-row-marker):last-of-type
+        + [data-testid="stHorizontalBlock"] {{
             border-bottom: none !important;
         }}
 
@@ -821,7 +915,7 @@ def inject_css() -> None:
             background: {_SAVE_BTN_BG} !important;
             color: {_SAVE_BTN_TEXT} !important;
             border: 1px solid {_SAVE_BTN_BORDER} !important;
-            border-radius: 0 !important;
+            border-radius: {_INPUT_RADIUS} !important;
             font-size: 12px !important;
             font-weight: 600 !important;
             min-height: 32px !important;
@@ -837,13 +931,14 @@ def inject_css() -> None:
             background: {_SAVE_BTN_BG} !important;
             color: {_SAVE_BTN_TEXT} !important;
             border: 1px solid {_SAVE_BTN_BORDER} !important;
+            border-radius: {_INPUT_RADIUS} !important;
         }}
         .block-container:has(#simulate-page) [data-testid="column"]:has(.sim-toggle-col) div[data-testid="stButton"] button,
         .block-container:has(#simulate-page) [class*="st-key-sim_toggle_"] button {{
             background: {_SAVE_BTN_BG} !important;
             color: {_SAVE_BTN_TEXT} !important;
             border: 1px solid {_SAVE_BTN_BORDER} !important;
-            border-radius: 0 !important;
+            border-radius: {_INPUT_RADIUS} !important;
             min-height: 32px !important;
             height: 32px !important;
             width: 32px !important;
@@ -1003,6 +1098,10 @@ def inject_css() -> None:
         [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] [data-testid="stNumberInputStepUp"],
         [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] [data-testid="stNumberInput"] button,
         [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] [data-testid="stNumberInputContainer"] button,
+        [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) [data-testid="stNumberInputStepDown"],
+        [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) [data-testid="stNumberInputStepUp"],
+        [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) [data-testid="stNumberInput"] button,
+        [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) [data-testid="stNumberInputContainer"] button,
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap) [data-testid="stNumberInputStepDown"],
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap) [data-testid="stNumberInputStepUp"],
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap) [data-testid="stNumberInput"] button,
@@ -1038,7 +1137,8 @@ def inject_css() -> None:
             padding: 0 4px !important;
         }}
         [data-testid="column"]:has(.sim-num-wrap) .sim-pct-inline,
-        [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] .sim-pct-inline {{
+        [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] .sim-pct-inline,
+        [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) .sim-pct-inline {{
             display: inline-flex !important;
             align-items: center !important;
             font-size: 13px !important;
@@ -1051,7 +1151,8 @@ def inject_css() -> None:
             white-space: nowrap !important;
             user-select: none !important;
         }}
-        [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] [data-testid="column"]:last-child > div[data-testid="stVerticalBlock"] {{
+        [data-testid="stElementContainer"]:has(.sim-field-row-marker) + [data-testid="stHorizontalBlock"] [data-testid="column"]:last-child > div[data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) [data-testid="column"]:last-child > div[data-testid="stVerticalBlock"] {{
             display: inline-flex !important;
             flex-direction: row !important;
             flex-wrap: nowrap !important;
@@ -1266,6 +1367,517 @@ def inject_css() -> None:
             background-color: #ffffff !important;
             background: #ffffff !important;
         }}
+
+        /* Inflation matrix table — Figma layout */
+        .sim-infl-table-wrap-marker {{ display: none !important; }}
+        .sim-infl-matrix-marker {{ display: none !important; }}
+        .sim-infl-row-marker {{ display: none !important; }}
+        .sim-infl-header-marker {{ display: none !important; }}
+        .sim-infl-calc-row-marker {{ display: none !important; }}
+        .sim-infl-calc-caption {{
+            margin: 20px 0 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: {_TEXT_MUTED};
+        }}
+        [data-testid="stElementContainer"]:has(.sim-infl-table-wrap-marker) {{
+            border: 1px solid #E5E7EB !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            margin-top: 12px !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+        }}
+        [class*="st-key-sim_infl_input_"],
+        [class*="st-key-sim_infl_calc_table_"] {{
+            border: 1px solid #E5E7EB !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+            margin-top: 12px !important;
+            background: #ffffff !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="column"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="column"],
+        [class*="st-key-sim_infl_input_"] [data-testid="stElementContainer"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stElementContainer"],
+        [class*="st-key-sim_infl_input_"] [data-testid="stMarkdownContainer"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stMarkdownContainer"] {{
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stVerticalBlock"] {{
+            gap: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        .sim-infl-header-bar {{
+            display: grid !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            border-bottom: 1px solid #000000 !important;
+        }}
+        .sim-infl-header-bar .sim-infl-hcell {{
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            color: #ffffff !important;
+            line-height: 1.3 !important;
+            padding: 12px 8px !important;
+            word-break: break-word !important;
+            min-height: 44px !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            text-align: center !important;
+            width: 100% !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stElementContainer"]:has(.sim-infl-header-bar),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stElementContainer"]:has(.sim-infl-header-bar) {{
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-header-marker) {{
+            gap: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-header-marker) [data-testid="column"] {{
+            padding: 0 !important;
+            margin: 0 !important;
+            background: transparent !important;
+        }}
+        .sim-infl-hcell {{
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            color: #ffffff !important;
+            line-height: 1.3 !important;
+            padding: 12px 8px !important;
+            word-break: break-word !important;
+            min-height: 44px !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            text-align: center !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker),
+        [class*="st-key-sim_infl_input_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker),
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker),
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) {{
+            margin: 0 !important;
+            padding: 8px 10px !important;
+            gap: 8px !important;
+            align-items: center !important;
+            border-bottom: 1px solid #000000 !important;
+            background: #ffffff !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+            min-height: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"],
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"],
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 40px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"]:first-child,
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"]:first-child,
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"]:first-child,
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"]:first-child {{
+            justify-content: flex-start !important;
+            align-items: center !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"] {{
+            width: 100% !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            min-height: 40px !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"]:first-child > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"]:first-child > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-row-marker) > [data-testid="column"]:first-child > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-marker) > [data-testid="column"]:first-child > [data-testid="stVerticalBlock"] {{
+            align-items: flex-start !important;
+            justify-content: center !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stElementContainer"]:has(.sim-pct-chip-readonly),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stElementContainer"]:has(.sim-pct-chip-readonly),
+        [class*="st-key-sim_infl_input_"] [data-testid="stMarkdownContainer"]:has(.sim-pct-chip-readonly),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stMarkdownContainer"]:has(.sim-pct-chip-readonly) {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 40px !important;
+        }}
+        .sim-pct-chip-readonly {{
+            margin: 0 auto !important;
+            display: inline-flex !important;
+            vertical-align: middle !important;
+        }}
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-row-last),
+        [data-testid="stHorizontalBlock"]:has(.sim-infl-calc-row-last) {{
+            border-bottom: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stElementContainer"]:has(.sim-infl-row-marker),
+        [class*="st-key-sim_infl_input_"] [data-testid="stElementContainer"]:has(.sim-infl-calc-row-marker),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stElementContainer"]:has(.sim-infl-row-marker),
+        [class*="st-key-sim_infl_calc_table_"] [data-testid="stElementContainer"]:has(.sim-infl-calc-row-marker) {{
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+        }}
+        .sim-infl-row-label {{
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px;
+            font-size: 12px;
+            font-weight: 400;
+            color: #374151;
+            padding: 0 !important;
+            min-height: 40px;
+            line-height: 1.3;
+        }}
+        .sim-infl-pct-chip {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            width: fit-content !important;
+            min-width: {_PCT_CHIP_MIN_W} !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            min-height: 40px !important;
+            height: 40px !important;
+            padding: 0 12px !important;
+            box-sizing: border-box !important;
+            background: {_INPUT_BG} !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+        }}
+        .sim-infl-pct-chip-readonly {{
+            background: {_INPUT_BG} !important;
+        }}
+        .sim-pct-chip-right {{
+            margin-left: auto !important;
+            margin-right: 0 !important;
+        }}
+        .sim-pct-chip-right .sim-infl-pct-val {{
+            font-size: 14px !important;
+            font-weight: 700 !important;
+        }}
+        .sim-pct-chip-right .sim-infl-pct-suffix {{
+            font-size: 13px !important;
+            font-weight: 600 !important;
+        }}
+        .sim-infl-pct-val {{
+            font-size: 12px;
+            font-weight: 400;
+            color: {_PRIMARY};
+            flex: 1;
+            text-align: left;
+        }}
+        .sim-infl-pct-suffix {{
+            font-size: 12px;
+            font-weight: 400;
+            color: #64748b;
+            flex-shrink: 0;
+            margin-left: 4px;
+        }}
+        .sim-infl-pct-input-marker,
+        .sim-pct-input-marker {{ display: none !important; }}
+        [data-testid="column"]:has(.sim-infl-pct-input-marker),
+        [data-testid="column"]:has(.sim-pct-input-marker),
+        [class*="st-key-sim_infl_input_"] [data-testid="column"]:has(.sim-infl-pct-input-marker),
+        [class*="st-key-sim_infl_input_"] [data-testid="column"]:has(.sim-pct-input-marker) {{
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) {{
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
+        }}
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) > div[data-testid="stVerticalBlock"],
+        [data-testid="column"]:has(.sim-pct-input-marker) > div[data-testid="stVerticalBlock"],
+        [class*="st-key-sim_infl_input_"] [data-testid="column"]:has(.sim-infl-pct-input-marker) > div[data-testid="stVerticalBlock"],
+        [class*="st-key-sim_infl_input_"] [data-testid="column"]:has(.sim-pct-input-marker) > div[data-testid="stVerticalBlock"],
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) > div[data-testid="stVerticalBlock"] {{
+            width: 100% !important;
+            align-items: center !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) > div[data-testid="stVerticalBlock"] {{
+            align-items: flex-end !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"],
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"] > div,
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) [data-testid="stTextInput"],
+        [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"],
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) [data-testid="stTextInput"] > div,
+        [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] > div,
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"],
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] > div {{
+            width: fit-content !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"],
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] > div {{
+            margin-right: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"] label,
+        [class*="st-key-sim_infl_input_"] [data-testid="stWidgetLabel"],
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) [data-testid="stTextInput"] label,
+        [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] label,
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) [data-testid="stWidgetLabel"],
+        [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stWidgetLabel"],
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] label,
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stWidgetLabel"] {{
+            display: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"],
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) div[data-baseweb="input"],
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"],
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] {{
+            position: relative !important;
+            width: fit-content !important;
+            min-width: {_PCT_CHIP_MIN_W} !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            min-height: {_PCT_CHIP_H} !important;
+            height: {_PCT_CHIP_H} !important;
+            background: {_INPUT_BG} !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] {{
+            padding: {_PCT_CHIP_PAD} !important;
+            gap: {_PCT_CHIP_GAP} !important;
+        }}
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) div[data-baseweb="input"],
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"],
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] {{
+            padding: 0 24px 0 10px !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] {{
+            margin-right: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] > div,
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) div[data-baseweb="input"] > div,
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] > div,
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] > div {{
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            min-height: 38px !important;
+            height: 38px !important;
+            display: flex !important;
+            align-items: center !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] input,
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"] input,
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) div[data-baseweb="input"] input,
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] input,
+        [data-testid="column"]:has(.sim-infl-pct-input-marker) [data-testid="stTextInput"] input,
+        [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] input {{
+            text-align: left !important;
+            font-weight: 400 !important;
+            font-size: 12px !important;
+            color: {_PRIMARY} !important;
+            border: none !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            outline: none !important;
+            min-height: 38px !important;
+            height: 38px !important;
+            width: 44px !important;
+            min-width: 32px !important;
+            max-width: 52px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] input,
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] input {{
+            font-weight: 700 !important;
+            font-size: 14px !important;
+            width: 52px !important;
+            min-width: 44px !important;
+            max-width: 72px !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"]:focus-within {{
+            border-color: #94a3b8 !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"]:focus-within,
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"]:focus-within,
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] div[data-baseweb="input"]:focus-within {{
+            border-color: #94a3b8 !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"]:has(input:disabled),
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"]:has(input:disabled),
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] div[data-baseweb="input"]:has(input:disabled) {{
+            cursor: default !important;
+            opacity: 1 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] input:disabled,
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] input:disabled,
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] div[data-baseweb="input"] input:disabled {{
+            opacity: 1 !important;
+            color: {_PRIMARY} !important;
+            -webkit-text-fill-color: {_PRIMARY} !important;
+            cursor: default !important;
+        }}
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] [data-testid="stTextInput"],
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] [data-testid="stTextInput"] > div {{
+            width: fit-content !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            margin-left: auto !important;
+            margin-right: 0 !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] div[data-baseweb="input"] {{
+            position: relative !important;
+            width: fit-content !important;
+            min-width: {_PCT_CHIP_MIN_W} !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            min-height: 40px !important;
+            height: 40px !important;
+            background: {_INPUT_BG} !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
+            padding: 0 24px 0 10px !important;
+            display: flex !important;
+            align-items: center !important;
+            margin-left: auto !important;
+            margin-right: 0 !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+        }}
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] div[data-baseweb="input"] > div {{
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            min-height: 38px !important;
+            height: 38px !important;
+            display: flex !important;
+            align-items: center !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
+        }}
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] div[data-baseweb="input"] input,
+        [data-testid="stElementContainer"][class*="st-key-sim_f_"] [data-testid="stTextInput"] input {{
+            text-align: left !important;
+            font-weight: 700 !important;
+            font-size: 14px !important;
+            color: {_PRIMARY} !important;
+            border: none !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            outline: none !important;
+            min-height: 38px !important;
+            height: 38px !important;
+            width: 52px !important;
+            min-width: 44px !important;
+            max-width: 72px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"]::after {{
+            content: "%" !important;
+            position: static !important;
+            right: auto !important;
+            top: auto !important;
+            transform: none !important;
+            display: inline-block !important;
+            flex-shrink: 0 !important;
+            color: #64748b !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+            pointer-events: none !important;
+            user-select: none !important;
+            line-height: 1 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"]::after,
+        [class*="st-key-sim_f_"] div[data-baseweb="input"]::after {{
+            content: "%" !important;
+            position: absolute !important;
+            right: 12px !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+            color: #64748b !important;
+            pointer-events: none !important;
+            user-select: none !important;
+            line-height: 1 !important;
+            z-index: 6 !important;
+        }}
+        [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"]::after,
+        [class*="st-key-sim_f_"] div[data-baseweb="input"]::after {{
+            font-size: 13px !important;
+            font-weight: 600 !important;
+        }}
+        .sim-infl-pct-suffix-inline,
+        .sim-pct-suffix-inline {{
+            position: absolute !important;
+            right: 12px !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+            color: #64748b !important;
+            pointer-events: none !important;
+            user-select: none !important;
+            line-height: 1 !important;
+            z-index: 5 !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -1358,7 +1970,7 @@ def inject_paint_js() -> None:
 
             doc.querySelectorAll('[data-testid="column"]:has(.sim-pct-chip-row)').forEach((numCol) => {
               const chip = numCol.querySelector('[data-testid="stHorizontalBlock"]');
-              if (!chip) return;
+              if (!chip || chip.querySelector(".sim-pct-input-marker, .sim-infl-pct-input-marker")) return;
               numCol.style.setProperty("display", "flex", "important");
               numCol.style.setProperty("justify-content", "flex-end", "important");
               chip.style.setProperty("display", "inline-flex", "important");
@@ -1368,15 +1980,23 @@ def inject_paint_js() -> None:
               chip.style.setProperty("background", inputBg, "important");
               chip.style.setProperty("border", inputBorder, "important");
               chip.style.setProperty("border-radius", "8px", "important");
+              chip.style.setProperty("overflow", "hidden", "important");
               chip.style.setProperty("padding", "0 12px", "important");
               chip.style.setProperty("min-height", "40px", "important");
               chip.style.setProperty("height", "40px", "important");
               chip.style.setProperty("width", "fit-content", "important");
               chip.style.setProperty("margin-left", "auto", "important");
+              chip.querySelectorAll('div[data-baseweb="input"]').forEach((wrap) => {
+                wrap.style.setProperty("background", "transparent", "important");
+                wrap.style.setProperty("border", "none", "important");
+                wrap.style.setProperty("border-radius", "0", "important");
+                wrap.style.setProperty("box-shadow", "none", "important");
+              });
               chip.querySelectorAll('[data-testid="stTextInput"] input').forEach((input) => {
                 input.style.setProperty("text-align", "left", "important");
                 input.style.setProperty("font-weight", "700", "important");
                 input.style.setProperty("border", "none", "important");
+                input.style.setProperty("border-radius", "0", "important");
                 input.style.setProperty("background", "transparent", "important");
                 input.style.setProperty("box-shadow", "none", "important");
               });
@@ -1385,6 +2005,373 @@ def inject_paint_js() -> None:
                 pct.style.setProperty("font-weight", "600", "important");
                 pct.style.setProperty("color", "#64748b", "important");
               });
+            });
+
+            doc.querySelectorAll(".sim-infl-header-bar").forEach((bar) => {
+              bar.style.setProperty("display", "grid", "important");
+              bar.style.setProperty("width", "100%", "important");
+              bar.style.setProperty("box-sizing", "border-box", "important");
+              bar.style.setProperty("border-bottom", "1px solid #000000", "important");
+            });
+            doc.querySelectorAll(".sim-infl-header-bar .sim-infl-hcell").forEach((cell) => {
+              cell.style.setProperty("color", "#ffffff", "important");
+              cell.style.setProperty("font-size", "12px", "important");
+              cell.style.setProperty("font-weight", "700", "important");
+              cell.style.setProperty("display", "flex", "important");
+              cell.style.setProperty("align-items", "center", "important");
+              cell.style.setProperty("justify-content", "center", "important");
+              cell.style.setProperty("text-align", "center", "important");
+              cell.style.setProperty("min-height", "44px", "important");
+            });
+
+            doc.querySelectorAll(".sim-infl-row-marker, .sim-infl-calc-row-marker").forEach((marker) => {
+              const row = marker.closest('[data-testid="stHorizontalBlock"]');
+              if (!row) return;
+              const isLast = marker.classList.contains("sim-infl-row-last")
+                || marker.classList.contains("sim-infl-calc-row-last");
+              row.style.setProperty(
+                "border-bottom",
+                isLast ? "none" : "1px solid #000000",
+                "important"
+              );
+              row.style.setProperty("display", "flex", "important");
+              row.style.setProperty("align-items", "center", "important");
+              row.style.setProperty("padding", "8px 10px", "important");
+              row.style.setProperty("margin", "0", "important");
+              row.style.setProperty("box-sizing", "border-box", "important");
+              row.style.setProperty("width", "100%", "important");
+              row.style.setProperty("min-height", "0", "important");
+              row.style.setProperty("background", "#ffffff", "important");
+              row.querySelectorAll(':scope > [data-testid="column"]').forEach((col, idx) => {
+                col.style.setProperty("display", "flex", "important");
+                col.style.setProperty("align-items", "center", "important");
+                col.style.setProperty(
+                  "justify-content",
+                  idx === 0 ? "flex-start" : "center",
+                  "important"
+                );
+                col.style.setProperty("min-height", "40px", "important");
+                col.style.setProperty("padding", "0", "important");
+                col.style.setProperty("margin", "0", "important");
+                const vb = col.querySelector(':scope > [data-testid="stVerticalBlock"]');
+                if (vb) {
+                  vb.style.setProperty("width", "100%", "important");
+                  vb.style.setProperty("align-items", idx === 0 ? "flex-start" : "center", "important");
+                  vb.style.setProperty("justify-content", "center", "important");
+                  vb.style.setProperty("min-height", "40px", "important");
+                  vb.style.setProperty("gap", "0", "important");
+                  vb.style.setProperty("padding", "0", "important");
+                  vb.style.setProperty("margin", "0", "important");
+                }
+              });
+            });
+            doc.querySelectorAll(".sim-pct-chip-readonly").forEach((chip) => {
+              const inParam = chip.closest('[class*="st-key-sim_f_"]');
+              if (inParam) return;
+              chip.style.setProperty("margin-left", "auto", "important");
+              chip.style.setProperty("margin-right", "auto", "important");
+              chip.style.setProperty("display", "inline-flex", "important");
+              chip.style.setProperty("vertical-align", "middle", "important");
+            });
+            doc.querySelectorAll(
+              '[class*="st-key-sim_infl_input_"] [data-testid="stMarkdownContainer"], [class*="st-key-sim_infl_calc_table_"] [data-testid="stMarkdownContainer"]'
+            ).forEach((md) => {
+              if (!md.querySelector(".sim-pct-chip-readonly")) return;
+              md.style.setProperty("display", "flex", "important");
+              md.style.setProperty("align-items", "center", "important");
+              md.style.setProperty("justify-content", "center", "important");
+              md.style.setProperty("width", "100%", "important");
+              md.style.setProperty("min-height", "40px", "important");
+              md.style.setProperty("margin", "0", "important");
+              md.style.setProperty("padding", "0", "important");
+            });
+            doc.querySelectorAll(".sim-infl-row-label").forEach((el) => {
+              el.style.setProperty("display", "flex", "important");
+              el.style.setProperty("align-items", "center", "important");
+              el.style.setProperty("min-height", "40px", "important");
+              el.style.setProperty("font-size", "12px", "important");
+              el.style.setProperty("font-weight", "400", "important");
+              el.style.setProperty("margin", "0", "important");
+              el.style.setProperty("padding", "0", "important");
+            });
+
+            function paintPctInputChip(wrap) {
+              const col = wrap.closest('[data-testid="column"]');
+              const isParam = Boolean(wrap.closest('[class*="st-key-sim_f_"]'));
+              const inInfl = Boolean(wrap.closest('[class*="st-key-sim_infl_input_"]'));
+              const fontSize = isParam ? "14px" : "12px";
+              const fontWeight = isParam ? "700" : "400";
+              const inputWidth = isParam ? "52px" : "auto";
+              const inputMin = isParam ? "44px" : "24px";
+              const inputMax = isParam ? "72px" : "48px";
+              const marginRight = inInfl ? "auto" : "0";
+              const chipPad = inInfl ? "0 10px" : "0 24px 0 10px";
+              const chipGap = inInfl ? "4px" : "0";
+              wrap.setAttribute("data-pct-suffix", "1");
+              wrap.style.setProperty("position", "relative", "important");
+              wrap.style.setProperty("width", "fit-content", "important");
+              wrap.style.setProperty("min-width", "76px", "important");
+              wrap.style.setProperty("max-width", "100px", "important");
+              wrap.style.setProperty("min-height", "40px", "important");
+              wrap.style.setProperty("height", "40px", "important");
+              wrap.style.setProperty("background", inputBg, "important");
+              wrap.style.setProperty("background-color", inputBg, "important");
+              wrap.style.setProperty("border", inputBorder, "important");
+              wrap.style.setProperty("border-radius", "8px", "important");
+              wrap.style.setProperty("box-sizing", "border-box", "important");
+              wrap.style.setProperty("padding", chipPad, "important");
+              wrap.style.setProperty("gap", chipGap, "important");
+              wrap.style.setProperty("display", "inline-flex", "important");
+              wrap.style.setProperty("align-items", "center", "important");
+              wrap.style.setProperty("justify-content", "flex-start", "important");
+              wrap.style.setProperty("margin-left", "auto", "important");
+              wrap.style.setProperty("margin-right", marginRight, "important");
+              wrap.style.setProperty("box-shadow", "none", "important");
+              wrap.style.setProperty("overflow", "visible", "important");
+              wrap.querySelectorAll(':scope > div').forEach((inner) => {
+                inner.style.setProperty("flex", "1 1 auto", "important");
+                inner.style.setProperty("min-width", "0", "important");
+                inner.style.setProperty("background", "transparent", "important");
+                inner.style.setProperty("border", "none", "important");
+                inner.style.setProperty("box-shadow", "none", "important");
+                inner.style.setProperty("display", "flex", "important");
+                inner.style.setProperty("align-items", "center", "important");
+                inner.style.setProperty("overflow", "visible", "important");
+              });
+              wrap.querySelectorAll("input").forEach((input) => {
+                input.style.setProperty("text-align", "left", "important");
+                input.style.setProperty("font-size", fontSize, "important");
+                input.style.setProperty("font-weight", fontWeight, "important");
+                input.style.setProperty("color", "#011E41", "important");
+                input.style.setProperty("-webkit-text-fill-color", "#011E41", "important");
+                input.style.setProperty("border", "none", "important");
+                input.style.setProperty("background", "transparent", "important");
+                input.style.setProperty("box-shadow", "none", "important");
+                input.style.setProperty("outline", "none", "important");
+                input.style.setProperty("width", inputWidth, "important");
+                input.style.setProperty("min-width", inputMin, "important");
+                input.style.setProperty("max-width", inputMax, "important");
+                input.style.setProperty("padding", "0", "important");
+                input.style.setProperty("min-height", inInfl ? "auto" : "38px", "important");
+                input.style.setProperty("height", inInfl ? "auto" : "38px", "important");
+                if (input.disabled) {
+                  input.style.setProperty("opacity", "1", "important");
+                  input.style.setProperty("cursor", "default", "important");
+                  wrap.style.setProperty("cursor", "default", "important");
+                }
+              });
+              if (inInfl) {
+                const afterContent = window.getComputedStyle(wrap, "::after").getPropertyValue("content");
+                const hasSuffix = wrap.querySelector("[data-sim-pct-suffix]");
+                if (!hasSuffix && (afterContent === "none" || afterContent === '""' || afterContent === "")) {
+                  const suffix = doc.createElement("span");
+                  suffix.setAttribute("data-sim-pct-suffix", "1");
+                  suffix.textContent = "%";
+                  suffix.style.setProperty("flex-shrink", "0", "important");
+                  suffix.style.setProperty("color", "#64748b", "important");
+                  suffix.style.setProperty("font-size", "12px", "important");
+                  suffix.style.setProperty("font-weight", "400", "important");
+                  suffix.style.setProperty("line-height", "1", "important");
+                  suffix.style.setProperty("pointer-events", "none", "important");
+                  wrap.appendChild(suffix);
+                }
+              }
+              if (col) {
+                col.style.setProperty("display", "flex", "important");
+                col.style.setProperty("align-items", "center", "important");
+                col.style.setProperty(
+                  "justify-content",
+                  isParam ? "flex-end" : "center",
+                  "important"
+                );
+                const vb = col.querySelector(':scope > [data-testid="stVerticalBlock"]');
+                if (vb) {
+                  vb.style.setProperty("width", "100%", "important");
+                  vb.style.setProperty("align-items", isParam ? "flex-end" : "center", "important");
+                  vb.style.setProperty("justify-content", "center", "important");
+                  vb.style.setProperty("min-height", "40px", "important");
+                  vb.style.setProperty("gap", "0", "important");
+                  vb.style.setProperty("padding", "0", "important");
+                  vb.style.setProperty("margin", "0", "important");
+                }
+              }
+            }
+            doc.querySelectorAll('[class*="st-key-sim_infl_input_"] [data-testid="column"], [class*="st-key-sim_infl_calc_table_"] [data-testid="column"]').forEach((col) => {
+              col.style.setProperty("overflow", "visible", "important");
+              col.style.setProperty("min-width", "0", "important");
+            });
+            doc.querySelectorAll('[class*="st-key-sim_infl_input_"] div[data-baseweb="input"]').forEach(paintPctInputChip);
+            doc.querySelectorAll('[class*="st-key-sim_f_"]').forEach((widgetRoot) => {
+              if (!widgetRoot.querySelector('[data-testid="stTextInput"]')) return;
+              const wrap = widgetRoot.querySelector('div[data-baseweb="input"]');
+              if (wrap) paintPctInputChip(wrap);
+            });
+            doc.querySelectorAll(".sim-pct-input-marker, .sim-infl-pct-input-marker").forEach((marker) => {
+              const col = marker.closest('[data-testid="column"]');
+              if (!col) return;
+              const wrap = col.querySelector('div[data-baseweb="input"]');
+              if (wrap) paintPctInputChip(wrap);
+            });
+
+            doc.querySelectorAll(".sim-infl-row-label, .sim-infl-pct-val").forEach((el) => {
+              el.style.setProperty("font-size", "12px", "important");
+              el.style.setProperty("font-weight", "400", "important");
+            });
+
+            doc.querySelectorAll(".sim-pc-row-marker").forEach((marker) => {
+              const row = marker.closest('[data-testid="stHorizontalBlock"]');
+              if (!row) return;
+              row.style.setProperty("display", "flex", "important");
+              row.style.setProperty("align-items", "center", "important");
+              row.style.setProperty("padding", "8px 10px", "important");
+              row.style.setProperty("margin", "0", "important");
+              row.style.setProperty("gap", "8px", "important");
+              row.style.setProperty("border-bottom", "1px solid #000000", "important");
+              row.style.setProperty("background", "#ffffff", "important");
+              row.style.setProperty("box-sizing", "border-box", "important");
+              row.style.setProperty("width", "100%", "important");
+              row.querySelectorAll(':scope > [data-testid="column"]').forEach((col, idx) => {
+                col.style.setProperty("display", "flex", "important");
+                col.style.setProperty("align-items", "center", "important");
+                col.style.setProperty("justify-content", idx < 2 ? "flex-start" : "center", "important");
+                col.style.setProperty("overflow", "visible", "important");
+                col.style.setProperty("min-height", "36px", "important");
+                if (idx >= 2) {
+                  col.querySelectorAll('[data-testid="stVerticalBlock"], [data-testid="stElementContainer"], [data-testid="stMarkdownContainer"]').forEach((el) => {
+                    el.style.setProperty("display", "flex", "important");
+                    el.style.setProperty("align-items", "center", "important");
+                    el.style.setProperty("justify-content", "center", "important");
+                    el.style.setProperty("width", "100%", "important");
+                    el.style.setProperty("margin", "0", "important");
+                    el.style.setProperty("padding", "0", "important");
+                  });
+                }
+              });
+            });
+            doc.querySelectorAll('[class*="st-key-sim_pc_input_"] div[data-baseweb="input"]').forEach((wrap) => {
+              wrap.style.setProperty("display", "inline-flex", "important");
+              wrap.style.setProperty("align-items", "center", "important");
+              wrap.style.setProperty("justify-content", "center", "important");
+              wrap.style.setProperty("min-width", "84px", "important");
+              wrap.style.setProperty("max-width", "108px", "important");
+              wrap.style.setProperty("min-height", "36px", "important");
+              wrap.style.setProperty("height", "36px", "important");
+              wrap.style.setProperty("padding", "0 8px", "important");
+              wrap.style.setProperty("margin-left", "auto", "important");
+              wrap.style.setProperty("margin-right", "auto", "important");
+              wrap.style.setProperty("background", "#ffffff", "important");
+              wrap.style.setProperty("border", "1px solid #D4DBE6", "important");
+              wrap.style.setProperty("border-radius", "8px", "important");
+              wrap.querySelectorAll("input").forEach((input) => {
+                input.style.setProperty("text-align", "center", "important");
+                input.style.setProperty("font-size", "12px", "important");
+                input.style.setProperty("font-weight", "400", "important");
+                input.style.setProperty("color", "#011E41", "important");
+                input.style.setProperty("border", "none", "important");
+                input.style.setProperty("background", "transparent", "important");
+                input.style.setProperty("width", "100%", "important");
+                input.style.setProperty("padding", "0", "important");
+              });
+            });
+            doc.querySelectorAll(".sim-pc-value-chip").forEach((chip) => {
+              chip.style.setProperty("display", "inline-flex", "important");
+              chip.style.setProperty("align-items", "center", "important");
+              chip.style.setProperty("justify-content", "center", "important");
+              chip.style.setProperty("min-width", "84px", "important");
+              chip.style.setProperty("max-width", "108px", "important");
+              chip.style.setProperty("width", "fit-content", "important");
+              chip.style.setProperty("min-height", "36px", "important");
+              chip.style.setProperty("height", "36px", "important");
+              chip.style.setProperty("margin", "0 auto", "important");
+              chip.style.setProperty("white-space", "nowrap", "important");
+              if (chip.classList.contains("sim-pc-total-chip")) {
+                chip.style.setProperty("background", "#E8EEF7", "important");
+                chip.style.setProperty("font-weight", "700", "important");
+                chip.style.setProperty("border", "none", "important");
+              }
+              const md = chip.closest('[data-testid="stMarkdownContainer"]');
+              if (md) {
+                md.style.setProperty("display", "flex", "important");
+                md.style.setProperty("align-items", "center", "important");
+                md.style.setProperty("justify-content", "center", "important");
+                md.style.setProperty("width", "100%", "important");
+              }
+            });
+
+            doc.querySelectorAll(".sim-pc-total-marker").forEach((marker) => {
+              const row = marker.closest('[data-testid="stHorizontalBlock"]');
+              if (!row) return;
+              row.style.setProperty("display", "flex", "important");
+              row.style.setProperty("align-items", "center", "important");
+              row.style.setProperty("padding", "10px", "important");
+              row.style.setProperty("margin", "0", "important");
+              row.style.setProperty("gap", "8px", "important");
+              row.style.setProperty("border-top", "1px solid #000000", "important");
+              row.style.setProperty("border-bottom", "none", "important");
+              row.style.setProperty("background", "#ffffff", "important");
+              row.style.setProperty("box-sizing", "border-box", "important");
+              row.style.setProperty("width", "100%", "important");
+              row.style.setProperty("min-height", "44px", "important");
+              row.style.setProperty("overflow", "visible", "important");
+              row.querySelectorAll(':scope > [data-testid="column"]').forEach((col, idx) => {
+                col.style.setProperty("display", "flex", "important");
+                col.style.setProperty("align-items", "center", "important");
+                col.style.setProperty("justify-content", idx < 2 ? "flex-start" : "center", "important");
+                col.style.setProperty("overflow", "visible", "important");
+                col.style.setProperty("min-height", "44px", "important");
+                if (idx >= 2) {
+                  col.querySelectorAll('[data-testid="stVerticalBlock"], [data-testid="stElementContainer"], [data-testid="stMarkdownContainer"]').forEach((el) => {
+                    el.style.setProperty("display", "flex", "important");
+                    el.style.setProperty("align-items", "center", "important");
+                    el.style.setProperty("justify-content", "center", "important");
+                    el.style.setProperty("width", "100%", "important");
+                    el.style.setProperty("margin", "0", "important");
+                    el.style.setProperty("padding", "0", "important");
+                  });
+                }
+              });
+            });
+            doc.querySelectorAll('[class*="st-key-sim_pc_input_"]').forEach((box) => {
+              box.style.setProperty("overflow", "visible", "important");
+              box.style.setProperty("padding-bottom", "10px", "important");
+            });
+
+            doc.querySelectorAll(".sim-delivery-mix-wrap").forEach((marker) => {
+              const root = marker.closest('[class*="st-key-sim_grp_"]')
+                || marker.closest('[data-testid="stVerticalBlockBorderWrapper"]');
+              if (!root) return;
+              root.querySelectorAll('[data-testid="stHorizontalBlock"]:has(.sim-field-row-marker)').forEach((row) => {
+                if (row.querySelector(".sim-section-header-marker")) return;
+                row.style.setProperty("padding", "10px", "important");
+                row.style.setProperty("margin", "0", "important");
+                row.style.setProperty("gap", "8px", "important");
+                row.style.setProperty("align-items", "center", "important");
+                row.style.setProperty("box-sizing", "border-box", "important");
+                row.style.setProperty("width", "100%", "important");
+                row.style.setProperty("background", "#ffffff", "important");
+                row.style.setProperty("display", "flex", "important");
+              });
+              root.querySelectorAll(".sim-dd-row-divider").forEach((line) => {
+                line.style.setProperty("display", "block", "important");
+                line.style.setProperty("width", "100%", "important");
+                line.style.setProperty("max-width", "100%", "important");
+                line.style.setProperty("height", "0", "important");
+                line.style.setProperty("margin", "0", "important");
+                line.style.setProperty("padding", "0", "important");
+                line.style.setProperty("border", "none", "important");
+                line.style.setProperty("border-top", "1px solid #000000", "important");
+                line.style.setProperty("background", "transparent", "important");
+                const ec = line.closest('[data-testid="stElementContainer"]');
+                if (ec) {
+                  ec.style.setProperty("margin", "0", "important");
+                  ec.style.setProperty("padding", "0", "important");
+                  ec.style.setProperty("width", "100%", "important");
+                }
+              });
+            });
+
+            doc.querySelectorAll('[class*="st-key-sim_save_"] button, [class*="st-key-sim_toggle_"] button').forEach((btn) => {
+              btn.style.setProperty("border-radius", "8px", "important");
             });
 
             doc.querySelectorAll('[class*="st-key-sim_reset"] button').forEach((btn) => {
@@ -1703,11 +2690,11 @@ def inject_paint_js() -> None:
           let ticks = 0;
           const timer = setInterval(() => {
             paint();
-            if (++ticks > 40) clearInterval(timer);
+            if (++ticks > 80) clearInterval(timer);
           }, 125);
           const obs = new MutationObserver(paint);
           obs.observe(doc.body, { childList: true, subtree: true });
-          setTimeout(() => obs.disconnect(), 12000);
+          setTimeout(() => obs.disconnect(), 30000);
         })();
         </script>
         """,
@@ -1737,6 +2724,20 @@ def _is_section_field(field: dict[str, Any]) -> bool:
 
 
 def _iter_input_fields(group: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    if _is_inflation_rates_group(group):
+        config = db_st.get_inflation_matrix_config()
+        fake_field = {"value": 0.0, "min": None, "max": None, "step": 0.1}
+        return [
+            (idx, {**fake_field, "_infl_row": row["key"], "_infl_col": None})
+            for idx, row in enumerate(config["input_rows"])
+        ]
+    if _is_process_cost_group(group):
+        config = db_st.get_process_cost_matrix_config()
+        fake_field = {"value": 0, "min": None, "max": None, "step": None}
+        return [
+            (idx, {**fake_field, "_pc_row": row["key"]})
+            for idx, row in enumerate(config["input_rows"])
+        ]
     return [
         (fi, field)
         for fi, field in enumerate(group.get("fields", []))
@@ -1752,6 +2753,20 @@ def _field_has_user_entry(
     group: dict[str, Any],
 ) -> bool:
     """True when the user entered a value different from the field default."""
+    if _is_inflation_rates_group(group) and "_infl_row" in field:
+        if field.get("_infl_col") is None:
+            config = db_st.get_inflation_matrix_config()
+            return any(
+                _infl_matrix_cell_has_user_entry(group_index, field["_infl_row"], col)
+                for col in range(len(config["columns"]))
+            )
+        return _infl_matrix_cell_has_user_entry(group_index, field["_infl_row"], field["_infl_col"])
+    if _is_process_cost_group(group) and "_pc_row" in field:
+        config = db_st.get_process_cost_matrix_config()
+        return any(
+            _pc_matrix_cell_has_user_entry(group_index, field["_pc_row"], col)
+            for col in range(len(config["columns"]))
+        )
     if _is_inflation_rates_group(group) and _is_inflation_calculated_field(field):
         return False
     key = _field_key(group_index, field_index)
@@ -1854,6 +2869,7 @@ def _parse_field_text(field: dict[str, Any], raw: str) -> int | float | None:
 _FIELD_WIDGET_VERSION = 9
 _DELIVERY_MIX_TITLE = "Direct Delivery"
 _INFLATION_RATES_TITLE = "Inflation Rates"
+_PROCESS_COST_TITLES = frozenset({"Process cost", "Project Costs (EUR)"})
 _INFLATION_CALC_TO_IMPACT = {
     "PTC": "PTC impact",
     "STC": "STC impact",
@@ -1877,10 +2893,46 @@ def _ensure_field_text_state(key: str, field: dict[str, Any]) -> None:
         st.session_state[key] = _field_display_str(field, st.session_state[key])
 
 
+def _persist_infl_matrix_displays(index: int) -> None:
+    config = db_st.get_inflation_matrix_config()
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            key = _infl_matrix_key(index, row["key"], col)
+            raw = st.session_state.get(key, "")
+            parsed = _parse_infl_cell_text(str(raw))
+            default = _infl_matrix_default(row["key"], col)
+            value = parsed if parsed is not None else default
+            display = _infl_display_str(value)
+            saved_key = _infl_matrix_saved_key(index, row["key"], col)
+            st.session_state[saved_key] = display
+            st.session_state[key] = display
+
+
+def _persist_pc_matrix_displays(index: int) -> None:
+    config = db_st.get_process_cost_matrix_config()
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            key = _pc_matrix_key(index, row["key"], col)
+            raw = st.session_state.get(key, "")
+            parsed = _parse_pc_cell_text(str(raw))
+            default = _pc_matrix_default(row["key"], col)
+            value = parsed if parsed is not None else default
+            display = _pc_display_str(value)
+            saved_key = _pc_matrix_saved_key(index, row["key"], col)
+            st.session_state[saved_key] = display
+            st.session_state[key] = display
+
+
 def _persist_group_field_displays(index: int, group: dict[str, Any]) -> None:
     """Freeze entered values on Save so locked rows keep what the user typed."""
+    if _is_inflation_rates_group(group):
+        _persist_infl_matrix_displays(index)
+        return
+    if _is_process_cost_group(group):
+        _persist_pc_matrix_displays(index)
+        return
     for fi, field in enumerate(group.get("fields", [])):
-        if _is_inflation_rates_group(group) and _is_inflation_calculated_field(field):
+        if _is_inflation_calculated_field(field):
             continue
         key = _field_key(index, fi)
         raw = st.session_state.get(key, "")
@@ -1960,6 +3012,216 @@ def _is_inflation_rates_group(group: dict[str, Any]) -> bool:
     return group.get("title") == _INFLATION_RATES_TITLE
 
 
+def _is_process_cost_group(group: dict[str, Any]) -> bool:
+    return group.get("title") in _PROCESS_COST_TITLES
+
+
+_INFL_MATRIX_VERSION = 2
+_PC_MATRIX_VERSION = 2
+_INFL_PCT_FIELD = {"value": 0.0, "min": None, "max": None, "step": 0.1}
+_PC_INT_FIELD = {"value": 0, "min": None, "max": None, "step": None}
+
+
+def _infl_matrix_row_spec(row_key: str) -> dict[str, Any]:
+    for row in db_st.get_inflation_matrix_config()["input_rows"]:
+        if row["key"] == row_key:
+            return row
+    raise KeyError(row_key)
+
+
+def _infl_matrix_default(row_key: str, col: int) -> float:
+    return float(_infl_matrix_row_spec(row_key)["defaults"][col])
+
+
+def _infl_matrix_key(group_index: int, row_key: str, col: int) -> str:
+    return f"sim_infl_{group_index}_{row_key}_{col}"
+
+
+def _infl_matrix_saved_key(group_index: int, row_key: str, col: int) -> str:
+    return f"sim_infl_saved_{group_index}_{row_key}_{col}"
+
+
+def _infl_matrix_ver_key(group_index: int) -> str:
+    return f"sim_infl_ver_{group_index}"
+
+
+def _parse_infl_cell_text(raw: str) -> float | None:
+    text = (raw or "").strip().replace("%", "")
+    if not text:
+        return None
+    try:
+        return round(float(text), 1)
+    except ValueError:
+        return None
+
+
+def _ensure_infl_matrix_cell_state(group_index: int, row_key: str, col: int) -> None:
+    key = _infl_matrix_key(group_index, row_key, col)
+    ver_key = _infl_matrix_ver_key(group_index)
+    default = _infl_matrix_default(row_key, col)
+    if st.session_state.get(ver_key) != _INFL_MATRIX_VERSION:
+        st.session_state.pop(key, None)
+        st.session_state[key] = _infl_display_str(default)
+        st.session_state[ver_key] = _INFL_MATRIX_VERSION
+    elif key not in st.session_state:
+        st.session_state[key] = _infl_display_str(default)
+    elif isinstance(st.session_state[key], (int, float)):
+        st.session_state[key] = _infl_display_str(st.session_state[key])
+
+
+def _infl_matrix_cell_value(group_index: int, row_key: str, col: int) -> float:
+    key = _infl_matrix_key(group_index, row_key, col)
+    default = _infl_matrix_default(row_key, col)
+    raw = st.session_state.get(key, _field_display_str(_INFL_PCT_FIELD, default))
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    parsed = _parse_infl_cell_text(str(raw))
+    return float(default if parsed is None else parsed)
+
+
+def _infl_matrix_cell_display(group_index: int, row_key: str, col: int) -> str:
+    saved_key = _infl_matrix_saved_key(group_index, row_key, col)
+    if saved_key in st.session_state:
+        return str(st.session_state[saved_key])
+    return _field_display_str(_INFL_PCT_FIELD, _infl_matrix_cell_value(group_index, row_key, col))
+
+
+def _infl_matrix_cell_has_user_entry(group_index: int, row_key: str, col: int) -> bool:
+    key = _infl_matrix_key(group_index, row_key, col)
+    default = _infl_matrix_default(row_key, col)
+    raw = st.session_state.get(key, _field_display_str(_INFL_PCT_FIELD, default))
+    parsed = _parse_infl_cell_text(str(raw))
+    if parsed is None:
+        return False
+    return abs(float(parsed) - float(default)) > 1e-9
+
+
+def _infl_matrix_vector(group_index: int, row_key: str) -> list[float]:
+    config = db_st.get_inflation_matrix_config()
+    return [_infl_matrix_cell_value(group_index, row_key, col) for col in range(len(config["columns"]))]
+
+
+def _inflation_cell_values(inflation_vector: tuple[float, ...] | list[float], impact: list[int] | tuple[int, ...] | list[float]) -> list[float]:
+    return [round(float(inflation_vector[i]) * float(impact[i]) / 100, 1) for i in range(len(inflation_vector))]
+
+
+def _compute_inflation_matrix(group_index: int) -> list[dict[str, Any]]:
+    """Compute PTC/STC/SWC rows from saved inflation + impact matrix inputs."""
+    config = db_st.get_inflation_matrix_config()
+    inflation_vector = _infl_matrix_vector(group_index, "inflation")
+    rows: list[dict[str, Any]] = []
+    for calc_row in config["calc_rows"]:
+        impact = _infl_matrix_vector(group_index, calc_row["impact_key"])
+        cells = _inflation_cell_values(inflation_vector, impact)
+        rows.append({
+            "key": calc_row["key"],
+            "name": calc_row["label"],
+            "name_tags": calc_row.get("name_tags", []),
+            "cells": cells,
+            "effective_total": round(sum(cells), 1),
+        })
+    return rows
+
+
+def _pc_matrix_row_spec(row_key: str) -> dict[str, Any]:
+    for row in db_st.get_process_cost_matrix_config()["input_rows"]:
+        if row["key"] == row_key:
+            return row
+    raise KeyError(row_key)
+
+
+def _pc_matrix_default(row_key: str, col: int) -> int:
+    return int(_pc_matrix_row_spec(row_key)["defaults"][col])
+
+
+def _pc_matrix_key(group_index: int, row_key: str, col: int) -> str:
+    return f"sim_pc_{group_index}_{row_key}_{col}"
+
+
+def _pc_matrix_saved_key(group_index: int, row_key: str, col: int) -> str:
+    return f"sim_pc_saved_{group_index}_{row_key}_{col}"
+
+
+def _pc_matrix_ver_key(group_index: int) -> str:
+    return f"sim_pc_ver_{group_index}"
+
+
+def _parse_pc_cell_text(raw: str) -> int | None:
+    text = (raw or "").strip().replace(",", "").replace(" ", "")
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def _pc_display_str(value: Any) -> str:
+    return str(int(round(float(value))))
+
+
+def _ensure_pc_matrix_version(group_index: int) -> None:
+    """Reset all process-cost cells when matrix defaults/version change."""
+    ver_key = _pc_matrix_ver_key(group_index)
+    if st.session_state.get(ver_key) == _PC_MATRIX_VERSION:
+        return
+    config = db_st.get_process_cost_matrix_config()
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            st.session_state.pop(_pc_matrix_key(group_index, row["key"], col), None)
+            st.session_state.pop(_pc_matrix_saved_key(group_index, row["key"], col), None)
+    st.session_state[ver_key] = _PC_MATRIX_VERSION
+
+
+def _ensure_pc_matrix_cell_state(group_index: int, row_key: str, col: int) -> None:
+    _ensure_pc_matrix_version(group_index)
+    key = _pc_matrix_key(group_index, row_key, col)
+    default = _pc_matrix_default(row_key, col)
+    if key not in st.session_state:
+        st.session_state[key] = _pc_display_str(default)
+    elif isinstance(st.session_state[key], (int, float)):
+        st.session_state[key] = _pc_display_str(st.session_state[key])
+
+
+def _pc_matrix_cell_value(group_index: int, row_key: str, col: int) -> int:
+    key = _pc_matrix_key(group_index, row_key, col)
+    default = _pc_matrix_default(row_key, col)
+    raw = st.session_state.get(key, _pc_display_str(default))
+    if isinstance(raw, (int, float)):
+        return int(round(float(raw)))
+    parsed = _parse_pc_cell_text(str(raw))
+    return int(default if parsed is None else parsed)
+
+
+def _pc_matrix_cell_display(group_index: int, row_key: str, col: int) -> str:
+    saved_key = _pc_matrix_saved_key(group_index, row_key, col)
+    if saved_key in st.session_state:
+        return str(st.session_state[saved_key])
+    return _pc_display_str(_pc_matrix_cell_value(group_index, row_key, col))
+
+
+def _pc_matrix_cell_has_user_entry(group_index: int, row_key: str, col: int) -> bool:
+    key = _pc_matrix_key(group_index, row_key, col)
+    default = _pc_matrix_default(row_key, col)
+    raw = st.session_state.get(key, _pc_display_str(default))
+    parsed = _parse_pc_cell_text(str(raw))
+    if parsed is None:
+        return False
+    return int(parsed) != int(default)
+
+
+def _compute_pc_column_totals(group_index: int) -> list[int]:
+    config = db_st.get_process_cost_matrix_config()
+    totals: list[int] = []
+    for col in range(len(config["columns"])):
+        total = sum(
+            _pc_matrix_cell_value(group_index, row["key"], col)
+            for row in config["input_rows"]
+        )
+        totals.append(int(total))
+    return totals
+
+
 def _inflation_impact_field_index(group: dict[str, Any], impact_name: str) -> int | None:
     for fi, field in enumerate(group.get("fields", [])):
         if field.get("name") == impact_name:
@@ -1986,15 +3248,11 @@ def _inflation_user_input_for_field(
     return float(_field_numeric_value(field, key))
 
 
-def _inflation_cell_values(inflation_vector: tuple[float, ...], impact: list[int] | tuple[int, ...]) -> list[float]:
-    return [round(inflation_vector[i] * impact[i] / 100, 1) for i in range(len(inflation_vector))]
-
-
 def _inflation_baseline_from_field(field: dict[str, Any]) -> float:
     if "infl_baseline" in field:
         return float(field["infl_baseline"])
     impact = field.get("impact") or ()
-    inflation_vector = field.get("inflation_vector") or (2.0, 3.0, 5.0, 2.0, -1.0, 2.0)
+    inflation_vector = field.get("inflation_vector") or db_st.get_inflation_matrix_config()["input_rows"][0]["defaults"]
     return round(sum(_inflation_cell_values(inflation_vector, impact)), 1)
 
 
@@ -2003,22 +3261,15 @@ def _inflation_effective_total(baseline: float, user_input: float) -> float:
 
 
 def _compute_inflation_rates(group_index: int, group: dict[str, Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for fi, field in enumerate(group.get("fields", [])):
-        user_input = _inflation_user_input_for_field(group_index, fi, field, group)
-        baseline = _inflation_baseline_from_field(field)
-        impact = field.get("impact") or []
-        inflation_vector = field.get("inflation_vector") or (2.0, 3.0, 5.0, 2.0, -1.0, 2.0)
-        cells = _inflation_cell_values(inflation_vector, impact) if impact else []
-        rows.append({
-            "name": field["name"],
-            "role": field.get("infl_role", "calculated"),
-            "infl_baseline": baseline,
-            "user_input": round(user_input, 1),
-            "cells": cells,
-            "effective_total": _inflation_effective_total(baseline, user_input),
-        })
-    return rows
+    return _compute_inflation_matrix(group_index)
+
+
+def _inflation_calc_row_by_name(group_index: int, name: str) -> dict[str, Any] | None:
+    calc_rows: list[dict[str, Any]] = st.session_state.get(_infl_calc_key(group_index), [])
+    for row in calc_rows:
+        if row.get("name") == name:
+            return row
+    return None
 
 
 def _inflation_field_value(
@@ -2028,6 +3279,10 @@ def _inflation_field_value(
     group: dict[str, Any],
 ) -> float:
     """Resolved inflation % for snapshots — uses saved calculation when available."""
+    if _is_inflation_calculated_field(field):
+        calc_row = _inflation_calc_row_by_name(group_index, field["name"])
+        if calc_row is not None:
+            return float(calc_row["effective_total"])
     calc_rows: list[dict[str, Any]] = st.session_state.get(_infl_calc_key(group_index), [])
     if calc_rows and field_index < len(calc_rows):
         return float(calc_rows[field_index]["effective_total"])
@@ -2048,6 +3303,18 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
         st.session_state.pop(f"sim_open_{i}", None)
         st.session_state.pop(_dm_calc_key(i), None)
         st.session_state.pop(_infl_calc_key(i), None)
+        st.session_state.pop(_infl_matrix_ver_key(i), None)
+        st.session_state.pop(_pc_matrix_ver_key(i), None)
+        infl_config = db_st.get_inflation_matrix_config()
+        for row in infl_config["input_rows"]:
+            for col in range(len(infl_config["columns"])):
+                st.session_state.pop(_infl_matrix_key(i, row["key"], col), None)
+                st.session_state.pop(_infl_matrix_saved_key(i, row["key"], col), None)
+        pc_config = db_st.get_process_cost_matrix_config()
+        for row in pc_config["input_rows"]:
+            for col in range(len(pc_config["columns"])):
+                st.session_state.pop(_pc_matrix_key(i, row["key"], col), None)
+                st.session_state.pop(_pc_matrix_saved_key(i, row["key"], col), None)
         for fi, _field in enumerate(group.get("fields", [])):
             key = _field_key(i, fi)
             st.session_state.pop(key, None)
@@ -2296,16 +3563,45 @@ def _capture_group_submission(
         if _is_inflation_rates_group(group)
         else []
     )
-    for fi, field in enumerate(group.get("fields", [])):
-        if _is_inflation_rates_group(group) and _is_inflation_calculated_field(field):
-            if infl_calc and fi < len(infl_calc):
-                calculated_fields.append({
-                    "name": field["name"],
-                    "name_tags": field.get("name_tags", []),
-                    "value": _field_display_str(field, infl_calc[fi]["effective_total"]),
-                    "suffix": field.get("suffix") or "%",
+    if _is_inflation_rates_group(group):
+        for calc_row in infl_calc:
+            calculated_fields.append({
+                "name": calc_row["name"],
+                "name_tags": calc_row.get("name_tags", []),
+                "value": _field_display_str(_INFL_PCT_FIELD, calc_row["effective_total"]),
+                "suffix": "%",
+            })
+        return {
+            "title": group["title"],
+            "status_summary": _status_summary(groups),
+            "status_rows": build_status_rows(groups),
+            "fields": fields,
+            "calculated_fields": calculated_fields,
+        }
+    if _is_process_cost_group(group):
+        config = db_st.get_process_cost_matrix_config()
+        for row in config["input_rows"]:
+            for col_idx, col_name in enumerate(config["columns"]):
+                fields.append({
+                    "name": f'{row["label"]} — {col_name}',
+                    "value": _pc_matrix_cell_value(index, row["key"], col_idx),
+                    "suffix": "",
                 })
-            continue
+        totals = _compute_pc_column_totals(index)
+        for col_idx, col_name in enumerate(config["columns"]):
+            calculated_fields.append({
+                "name": f"Total — {col_name}",
+                "value": totals[col_idx],
+                "suffix": "",
+            })
+        return {
+            "title": group["title"],
+            "status_summary": _status_summary(groups),
+            "status_rows": build_status_rows(groups),
+            "fields": fields,
+            "calculated_fields": calculated_fields,
+        }
+    for fi, field in enumerate(group.get("fields", [])):
         key = _field_key(index, fi)
         if dm_calc and fi < len(dm_calc):
             value = dm_calc[fi]["effective_dd"]
@@ -2352,7 +3648,20 @@ def _capture_submission_snapshot(groups: list[dict[str, Any]]) -> list[dict[str,
     """Store parameter values at Start simulation — right panel shows only this data."""
     rows: list[dict[str, Any]] = []
     for i, group in enumerate(groups):
+        if _is_process_cost_group(group):
+            config = db_st.get_process_cost_matrix_config()
+            for row in config["input_rows"]:
+                for col_idx, col_name in enumerate(config["columns"]):
+                    rows.append({
+                        "group": group["title"],
+                        "name": f'{row["label"]} — {col_name}',
+                        "value": _pc_matrix_cell_value(i, row["key"], col_idx),
+                        "suffix": "",
+                    })
+            continue
         for fi, field in enumerate(group.get("fields", [])):
+            if _is_inflation_rates_group(group) and not _is_inflation_calculated_field(field):
+                continue
             if _is_delivery_mix_group(group):
                 value = _delivery_mix_field_value(i, fi, field, group)
             elif _is_inflation_rates_group(group):
@@ -2571,6 +3880,650 @@ def render_parameter_group_header(
                 st.rerun()
 
 
+def _infl_display_str(value: Any) -> str:
+    v = float(value)
+    if abs(v - round(v)) < 1e-9:
+        return str(int(round(v)))
+    return f"{v:.1f}"
+
+
+def _render_pct_chip_html(
+    display: str,
+    *,
+    align: str = "center",
+    value_size: str = "12px",
+    value_weight: str = "400",
+    suffix_size: str = "12px",
+    suffix_weight: str = "400",
+) -> None:
+    """Read-only value + % chip — inline styles so % shows inside st.html and st.markdown."""
+    margin = "margin:0 auto;" if align == "center" else "margin-left:auto;margin-right:0;"
+    st.markdown(
+        f'<div class="sim-pct-chip-readonly" style="display:inline-flex;align-items:center;'
+        f'justify-content:flex-start;gap:4px;width:fit-content;max-width:100%;'
+        f'min-width:{_PCT_CHIP_MIN_W};{margin}background:{_INPUT_BG};border:1px solid {_INPUT_BORDER};'
+        f'border-radius:8px;padding:{_PCT_CHIP_PAD};gap:{_PCT_CHIP_GAP};min-height:{_PCT_CHIP_H};'
+        f'height:{_PCT_CHIP_H};box-sizing:border-box;overflow:visible;vertical-align:middle;">'
+        f'<span style="font-size:{value_size};font-weight:{value_weight};color:{_PRIMARY};'
+        f'flex-shrink:0;white-space:nowrap;">{html.escape(display)}</span>'
+        f'<span style="font-size:{suffix_size};font-weight:{suffix_weight};color:#64748b;'
+        f'flex-shrink:0;white-space:nowrap;">&#37;</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_infl_pct_chip(display: str, *, readonly: bool = True) -> None:
+    _render_pct_chip_html(display)
+
+
+def _inject_infl_matrix_chip_css() -> None:
+    """Co-located chip styles — guarantees same padding/% on first visit, Save, and Reset."""
+    st.markdown(
+        f"""
+        <style id="sim-infl-matrix-chip-v{_INFL_CSS_VERSION}">
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"],
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"] > div {{
+            width: fit-content !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] [data-testid="stTextInput"] label,
+        [class*="st-key-sim_infl_input_"] [data-testid="stWidgetLabel"] {{
+            display: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] {{
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: {_PCT_CHIP_GAP} !important;
+            width: fit-content !important;
+            min-width: {_PCT_CHIP_MIN_W} !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            min-height: {_PCT_CHIP_H} !important;
+            height: {_PCT_CHIP_H} !important;
+            padding: {_PCT_CHIP_PAD} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            background: {_INPUT_BG} !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] > div {{
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            min-height: unset !important;
+            height: auto !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"] input {{
+            text-align: left !important;
+            font-weight: 400 !important;
+            font-size: 12px !important;
+            color: {_PRIMARY} !important;
+            border: none !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            outline: none !important;
+            width: auto !important;
+            min-width: 24px !important;
+            max-width: 48px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            min-height: unset !important;
+            height: auto !important;
+        }}
+        [class*="st-key-sim_infl_input_"] div[data-baseweb="input"]::after {{
+            content: "%" !important;
+            position: static !important;
+            right: auto !important;
+            top: auto !important;
+            transform: none !important;
+            display: inline-block !important;
+            flex-shrink: 0 !important;
+            color: #64748b !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+            line-height: 1 !important;
+            pointer-events: none !important;
+            user-select: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] .sim-pct-chip-readonly,
+        [class*="st-key-sim_infl_calc_table_"] .sim-pct-chip-readonly {{
+            min-width: {_PCT_CHIP_MIN_W} !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            min-height: {_PCT_CHIP_H} !important;
+            height: {_PCT_CHIP_H} !important;
+            padding: {_PCT_CHIP_PAD} !important;
+            gap: {_PCT_CHIP_GAP} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_infl_matrix_cell_input(
+    group_index: int,
+    row_key: str,
+    col: int,
+    *,
+    locked: bool,
+) -> None:
+    key = _infl_matrix_key(group_index, row_key, col)
+    if locked:
+        display = _infl_matrix_cell_display(group_index, row_key, col)
+        _render_infl_pct_chip(display, readonly=True)
+        return
+    _ensure_infl_matrix_cell_state(group_index, row_key, col)
+    st.text_input("\u200b", key=key, label_visibility="collapsed")
+
+
+def _infl_matrix_column_weights(num_columns: int, *, include_total: bool) -> list[float]:
+    weights = [2.0] + [1.0] * num_columns
+    if include_total:
+        weights.append(0.9)
+    return weights
+
+
+def _render_infl_matrix_header_row(columns: tuple[str, ...], *, variant: str) -> None:
+    """Single HTML header bar — avoids white-on-white when Streamlit skips parent bg."""
+    header_bg = _PANEL_HEADER_BG if variant == "input" else "#4B5563"
+    labels = ["Inflation Type", *columns]
+    if variant == "calc":
+        labels.append("Total")
+    if variant == "calc":
+        grid_cols = "2fr " + " ".join(["1fr"] * len(columns)) + " 0.9fr"
+    else:
+        grid_cols = "2fr " + " ".join(["1fr"] * len(columns))
+    cells: list[str] = []
+    for label in labels:
+        cells.append(
+            f'<div class="sim-infl-hcell" style="background:{header_bg};color:#ffffff !important;'
+            f'font-size:12px;font-weight:700;justify-content:center;text-align:center;">'
+            f"{html.escape(label)}</div>"
+        )
+    st.markdown('<span class="sim-infl-header-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+    _html(
+        f'<div class="sim-infl-header-bar sim-infl-header-bar-{variant}" '
+        f'style="display:grid;grid-template-columns:{grid_cols};gap:0;'
+        f'background:{header_bg};border-radius:8px 8px 0 0;overflow:hidden;'
+        f'border-bottom:1px solid #000000;">'
+        f"{''.join(cells)}</div>"
+    )
+
+
+def _render_infl_row_label(label: str) -> None:
+    st.markdown(
+        f'<div class="sim-infl-row-label" style="display:flex;align-items:center;min-height:{_PCT_CHIP_H};'
+        f'font-size:12px;font-weight:400;color:#374151;line-height:1.3;margin:0;padding:0;">'
+        f"<span>{label}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_infl_matrix_input_table(group_index: int, *, locked: bool) -> None:
+    config = db_st.get_inflation_matrix_config()
+    columns = config["columns"]
+    st.markdown('<span class="sim-infl-matrix-marker sim-infl-input-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+    _render_infl_matrix_header_row(columns, variant="input")
+    input_rows = config["input_rows"]
+    for row_idx, row in enumerate(input_rows):
+        label = html.escape(row["label"])
+        last_cls = " sim-infl-row-last" if row_idx == len(input_rows) - 1 else ""
+        cols = st.columns(_infl_matrix_column_weights(len(columns), include_total=False), gap="small", vertical_alignment="center")
+        with cols[0]:
+            st.markdown(
+                f'<span class="sim-infl-row-marker{last_cls}" data-row="{html.escape(row["key"])}" aria-hidden="true"></span>',
+                unsafe_allow_html=True,
+            )
+            _render_infl_row_label(label)
+        for col_idx, col_widget in enumerate(cols[1:]):
+            with col_widget:
+                _render_infl_matrix_cell_input(group_index, row["key"], col_idx, locked=locked)
+
+
+def _render_infl_matrix_calc_table(group_index: int) -> None:
+    config = db_st.get_inflation_matrix_config()
+    columns = config["columns"]
+    calc_rows: list[dict[str, Any]] = st.session_state.get(_infl_calc_key(group_index), [])
+    st.markdown('<span class="sim-infl-matrix-marker sim-infl-calc-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+    _render_infl_matrix_header_row(columns, variant="calc")
+    for row_idx, calc_row in enumerate(calc_rows):
+        label = html.escape(calc_row["name"])
+        cells = calc_row.get("cells") or []
+        total = _infl_display_str(calc_row.get("effective_total", 0.0))
+        last_cls = " sim-infl-calc-row-last" if row_idx == len(calc_rows) - 1 else ""
+        cols = st.columns(_infl_matrix_column_weights(len(columns), include_total=True), gap="small", vertical_alignment="center")
+        with cols[0]:
+            st.markdown(
+                f'<span class="sim-infl-calc-row-marker{last_cls}" aria-hidden="true"></span>',
+                unsafe_allow_html=True,
+            )
+            _render_infl_row_label(label)
+        for col_idx, col_widget in enumerate(cols[1:-1]):
+            with col_widget:
+                _render_infl_pct_chip(_infl_display_str(cells[col_idx]), readonly=True)
+        with cols[-1]:
+            _render_infl_pct_chip(total, readonly=True)
+
+
+def _inject_pc_matrix_css() -> None:
+    st.markdown(
+        f"""
+        <style id="sim-pc-matrix-chip-v{_INFL_CSS_VERSION}">
+        [class*="st-key-sim_pc_input_"] {{
+            border: 1px solid #E5E7EB !important;
+            border-radius: 8px !important;
+            overflow: visible !important;
+            padding: 0 0 10px 0 !important;
+            margin-top: 12px !important;
+            background: #ffffff !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stVerticalBlockBorderWrapper"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stMarkdownContainer"],
+        [class*="st-key-sim_pc_input_"] [data-testid="column"] {{
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) {{
+            margin: 0 !important;
+            padding: 8px 10px !important;
+            gap: 8px !important;
+            align-items: center !important;
+            border-bottom: 1px solid #000000 !important;
+            background: #ffffff !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+            display: flex !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: {_PC_CHIP_H} !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:first-child,
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(2),
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:first-child,
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(2),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:first-child,
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(2),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:first-child,
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(2) {{
+            justify-content: flex-start !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"] {{
+            width: 100% !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:first-child > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:first-child > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"] {{
+            align-items: flex-start !important;
+            justify-content: center !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(n+3) > [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(n+3) > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(n+3) > [data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(n+3) > [data-testid="stVerticalBlock"] {{
+            align-items: center !important;
+            justify-content: center !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(n+3) [data-testid="stElementContainer"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(n+3) [data-testid="stElementContainer"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-marker) > [data-testid="column"]:nth-child(n+3) [data-testid="stElementContainer"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(n+3) [data-testid="stElementContainer"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has(.sim-pc-value-chip),
+        [class*="st-key-sim_pc_input_"] [data-testid="stMarkdownContainer"]:has(.sim-pc-value-chip) {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            min-height: {_PC_CHIP_H} !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has(.sim-pc-row-marker),
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has(.sim-pc-total-marker) {{
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }}
+        .sim-pc-value-chip {{
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-width: {_PC_CHIP_MIN_W} !important;
+            max-width: {_PC_CHIP_MAX_W} !important;
+            width: fit-content !important;
+            min-height: {_PC_CHIP_H} !important;
+            height: {_PC_CHIP_H} !important;
+            padding: 0 8px !important;
+            margin: 0 auto !important;
+            background: #ffffff !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+            color: {_PRIMARY} !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-last),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-row-last) {{
+            border-bottom: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) {{
+            border-bottom: none !important;
+            border-top: 1px solid #000000 !important;
+            background: #ffffff !important;
+            margin: 0 !important;
+            padding: 10px !important;
+            gap: 8px !important;
+            align-items: center !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: visible !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:first-child,
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(2),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:first-child,
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-total-marker) > [data-testid="column"]:nth-child(2) {{
+            justify-content: flex-start !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has(.sim-pc-total-chip),
+        [class*="st-key-sim_pc_input_"] [data-testid="stMarkdownContainer"]:has(.sim-pc-total-chip) {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: visible !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has(.sim-pc-total-marker) {{
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"] > div {{
+            width: fit-content !important;
+            max-width: {_PC_CHIP_MAX_W} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"] label,
+        [class*="st-key-sim_pc_input_"] [data-testid="stWidgetLabel"] {{
+            display: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] {{
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: fit-content !important;
+            min-width: {_PC_CHIP_MIN_W} !important;
+            max-width: {_PC_CHIP_MAX_W} !important;
+            min-height: {_PC_CHIP_H} !important;
+            height: {_PC_CHIP_H} !important;
+            padding: 0 8px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            background: #ffffff !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] input {{
+            text-align: center !important;
+            font-weight: 400 !important;
+            font-size: 12px !important;
+            color: {_PRIMARY} !important;
+            border: none !important;
+            background: transparent !important;
+            width: 100% !important;
+            min-width: 48px !important;
+            max-width: 80px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        .sim-pc-company-label,
+        .sim-pc-category-label {{
+            display: flex !important;
+            align-items: center !important;
+            min-height: {_PC_CHIP_H} !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+            color: #374151 !important;
+            line-height: 1.3 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        .sim-pc-category-label {{
+            font-weight: 400 !important;
+        }}
+        .sim-pc-value-chip.sim-pc-total-chip {{
+            background: {_PC_TOTAL_BG} !important;
+            font-weight: 700 !important;
+            border: none !important;
+        }}
+        .sim-pc-total-label {{
+            font-weight: 700 !important;
+            color: {_PRIMARY} !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_pc_chip_html(display: str, *, total: bool = False) -> None:
+    total_cls = " sim-pc-total-chip" if total else ""
+    bg = _PC_TOTAL_BG if total else "#ffffff"
+    weight = "700" if total else "400"
+    border = "none" if total else f"1px solid {_INPUT_BORDER}"
+    st.markdown(
+        f'<div class="sim-pc-value-chip{total_cls}" style="display:inline-flex;align-items:center;'
+        f'justify-content:center;min-width:{_PC_CHIP_MIN_W};max-width:{_PC_CHIP_MAX_W};width:fit-content;'
+        f'min-height:{_PC_CHIP_H};height:{_PC_CHIP_H};padding:0 8px;margin:0 auto;'
+        f'background:{bg};border:{border};border-radius:8px;box-sizing:border-box;'
+        f'font-size:12px;font-weight:{weight};color:{_PRIMARY};white-space:nowrap;">'
+        f"{html.escape(display)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_pc_matrix_cell_input(
+    group_index: int,
+    row_key: str,
+    col: int,
+    *,
+    locked: bool,
+) -> None:
+    key = _pc_matrix_key(group_index, row_key, col)
+    if locked:
+        _render_pc_chip_html(_pc_matrix_cell_display(group_index, row_key, col))
+        return
+    _ensure_pc_matrix_cell_state(group_index, row_key, col)
+    st.text_input("\u200b", key=key, label_visibility="collapsed")
+
+
+def _pc_matrix_column_weights(num_value_cols: int) -> list[float]:
+    return [0.75, 2.2] + [1.0] * num_value_cols
+
+
+def _render_pc_matrix_header_row(config: dict) -> None:
+    header_bg = _PANEL_HEADER_BG
+    labels = [config["company_label"], config["category_label"], *config["columns"]]
+    grid_cols = "0.75fr 2.2fr " + " ".join(["1fr"] * len(config["columns"]))
+    cells: list[str] = []
+    for label in labels:
+        cells.append(
+            f'<div class="sim-infl-hcell" style="background:{header_bg};color:#ffffff !important;'
+            f'font-size:12px;font-weight:700;justify-content:center;text-align:center;">'
+            f"{html.escape(label)}</div>"
+        )
+    st.markdown('<span class="sim-pc-header-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+    _html(
+        f'<div class="sim-infl-header-bar sim-pc-header-bar" '
+        f'style="display:grid;grid-template-columns:{grid_cols};gap:0;'
+        f'background:{header_bg};border-radius:8px 8px 0 0;overflow:hidden;'
+        f'border-bottom:1px solid #000000;">'
+        f"{''.join(cells)}</div>"
+    )
+
+
+def _render_pc_matrix_input_table(group_index: int, *, locked: bool) -> None:
+    config = db_st.get_process_cost_matrix_config()
+    columns = config["columns"]
+    company_code = _selected_panel_company()
+    st.markdown('<span class="sim-pc-matrix-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+    _render_pc_matrix_header_row(config)
+    input_rows = config["input_rows"]
+    for row_idx, row in enumerate(input_rows):
+        cols = st.columns(_pc_matrix_column_weights(len(columns)), gap="small", vertical_alignment="center")
+        last_cls = " sim-pc-row-last" if row_idx == len(input_rows) - 1 else ""
+        with cols[0]:
+            st.markdown(
+                f'<span class="sim-pc-row-marker{last_cls}" aria-hidden="true"></span>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="sim-pc-company-label"><span>{html.escape(company_code)}</span></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f'<div class="sim-pc-category-label"><span>{html.escape(row["label"])}</span></div>',
+                unsafe_allow_html=True,
+            )
+        for col_idx, col_widget in enumerate(cols[2:]):
+            with col_widget:
+                _render_pc_matrix_cell_input(group_index, row["key"], col_idx, locked=locked)
+
+    totals = _compute_pc_column_totals(group_index)
+    cols = st.columns(_pc_matrix_column_weights(len(columns)), gap="small", vertical_alignment="center")
+    with cols[0]:
+        st.markdown('<span class="sim-pc-total-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sim-pc-company-label" aria-hidden="true"><span>&nbsp;</span></div>',
+            unsafe_allow_html=True,
+        )
+    with cols[1]:
+        st.markdown(
+            f'<div class="sim-pc-category-label sim-pc-total-label" '
+            f'style="min-height:{_PC_TOTAL_ROW_H};display:flex;align-items:center;">'
+            f"<span>Total</span></div>",
+            unsafe_allow_html=True,
+        )
+    for col_idx, col_widget in enumerate(cols[2:]):
+        with col_widget:
+            _render_pc_chip_html(_pc_display_str(totals[col_idx]), total=True)
+
+
+def render_process_cost_matrix_fields(group: dict[str, Any], index: int) -> None:
+    """Process cost matrix — company × category rows with PTC/STC/SWC value columns."""
+    locked = _group_is_saved(index)
+    _ensure_pc_matrix_version(index)
+    _inject_pc_matrix_css()
+    try:
+        input_box = st.container(border=True, key=f"sim_pc_input_{index}")
+    except TypeError:
+        input_box = st.container(border=True)
+    with input_box:
+        _render_pc_matrix_input_table(index, locked=locked)
+
+
+def render_inflation_matrix_fields(group: dict[str, Any], index: int) -> None:
+    """Inflation matrix — editable inputs on top, calculated display below after Save."""
+    locked = _group_is_saved(index)
+    _inject_infl_matrix_chip_css()
+    try:
+        input_box = st.container(border=True, key=f"sim_infl_input_{index}")
+    except TypeError:
+        input_box = st.container(border=True)
+    with input_box:
+        _render_infl_matrix_input_table(index, locked=locked)
+    if locked:
+        st.markdown(
+            '<p class="sim-infl-calc-caption">Auto calculation Impact based on the given above value</p>',
+            unsafe_allow_html=True,
+        )
+        try:
+            calc_box = st.container(border=True, key=f"sim_infl_calc_table_{index}")
+        except TypeError:
+            calc_box = st.container(border=True)
+        with calc_box:
+            _render_infl_matrix_calc_table(index)
+
+
 def _render_process_section_header(field: dict[str, Any], *, show_divider: bool) -> None:
     if show_divider:
         st.markdown('<hr class="sim-row-divider" aria-hidden="true" />', unsafe_allow_html=True)
@@ -2587,12 +4540,30 @@ def render_parameter_group_fields(group: dict[str, Any], index: int) -> None:
         return
 
     st.markdown('<span class="sim-group-fields-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+
+    if _is_inflation_rates_group(group):
+        render_inflation_matrix_fields(group, index)
+        return
+
+    if _is_process_cost_group(group):
+        render_process_cost_matrix_fields(group, index)
+        return
+
     fields = group.get("fields", [])
     if not fields:
         return
 
     content_started = False
     prev_was_section = False
+    delivery_last_fi: int | None = None
+    if _is_delivery_mix_group(group):
+        delivery_fis = [
+            fi
+            for fi, f in enumerate(fields)
+            if not _is_section_field(f)
+            and not (_is_inflation_rates_group(group) and _is_inflation_calculated_field(f))
+        ]
+        delivery_last_fi = delivery_fis[-1] if delivery_fis else None
     for fi, field in enumerate(fields):
         if _is_inflation_rates_group(group) and _is_inflation_calculated_field(field):
             continue
@@ -2601,10 +4572,16 @@ def render_parameter_group_fields(group: dict[str, Any], index: int) -> None:
             content_started = True
             prev_was_section = True
             continue
-        if content_started and not prev_was_section:
+        if content_started and not prev_was_section and not _is_delivery_mix_group(group):
             st.markdown('<hr class="sim-row-divider" aria-hidden="true" />', unsafe_allow_html=True)
         prev_was_section = False
-        _render_parameter_field(field, index, fi)
+        _render_parameter_field(
+            field,
+            index,
+            fi,
+            is_last_row=_is_delivery_mix_group(group) and fi == delivery_last_fi,
+            is_delivery_mix=_is_delivery_mix_group(group),
+        )
         content_started = True
 
 
@@ -2619,21 +4596,35 @@ def render_parameter_group(
     except TypeError:
         box = st.container(border=True)
     with box:
+        wrap_cls = "sim-param-group-wrap"
+        if _is_delivery_mix_group(group):
+            wrap_cls += " sim-delivery-mix-wrap"
         st.markdown(
-            f'<span class="sim-param-group-wrap" data-group="{index}" aria-hidden="true"></span>',
+            f'<span class="{wrap_cls}" data-group="{index}" aria-hidden="true"></span>',
             unsafe_allow_html=True,
         )
         render_parameter_group_header(group, index, groups)
         render_parameter_group_fields(group, index)
 
 
-def _render_parameter_field(field: dict[str, Any], group_index: int, field_index: int) -> None:
+def _render_parameter_field(
+    field: dict[str, Any],
+    group_index: int,
+    field_index: int,
+    *,
+    is_last_row: bool = False,
+    is_delivery_mix: bool = False,
+) -> None:
     key = _field_key(group_index, field_index)
     locked = _group_is_saved(group_index)
     tags = _tags_html(field.get("name_tags", []))
-    st.markdown('<span class="sim-field-row-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
-    col_l, col_r = st.columns([5.2, 1.5], vertical_alignment="center")
+    last_cls = " sim-field-row-last" if is_last_row else ""
+    col_l, col_r = st.columns([5.2, 1.5], gap="small", vertical_alignment="center")
     with col_l:
+        st.markdown(
+            f'<span class="sim-field-row-marker{last_cls}" aria-hidden="true"></span>',
+            unsafe_allow_html=True,
+        )
         desc_html = (
             f'<p style="margin:0;font-size:11px;color:{_TEXT_MUTED};line-height:1.4;">'
             f'{html.escape(field["desc"])}</p>'
@@ -2648,29 +4639,26 @@ def _render_parameter_field(field: dict[str, Any], group_index: int, field_index
     with col_r:
         if locked:
             display = _saved_field_display(group_index, field_index, field)
-            st.markdown(
-                '<span class="sim-pct-chip-row sim-pct-chip-readonly" aria-hidden="true"></span>',
-                unsafe_allow_html=True,
-            )
-            _html(
-                f'<div style="display:inline-flex;align-items:center;justify-content:flex-end;'
-                f'gap:4px;width:100%;background:{_INPUT_BG};border:1px solid {_INPUT_BORDER};'
-                f'border-radius:8px;padding:0 12px;min-height:40px;height:40px;box-sizing:border-box;">'
-                f'<span style="font-size:14px;font-weight:700;color:{_PRIMARY};">'
-                f'{html.escape(display)}</span>'
-                f'<span style="font-size:13px;font-weight:600;color:#64748b;">%</span></div>'
+            _render_pct_chip_html(
+                display,
+                align="right",
+                value_size="14px",
+                value_weight="700",
+                suffix_size="13px",
+                suffix_weight="600",
             )
         else:
-            st.markdown('<span class="sim-pct-chip-row" aria-hidden="true"></span>', unsafe_allow_html=True)
-            val_c, pct_c = st.columns([1, 0.28], gap="small", vertical_alignment="center")
-            with val_c:
-                _ensure_field_text_state(key, field)
-                st.text_input("\u200b", key=key, label_visibility="collapsed")
-            with pct_c:
-                st.markdown(
-                    '<span class="sim-pct-chip-suffix" aria-hidden="true">%</span>',
-                    unsafe_allow_html=True,
-                )
+            st.markdown('<span class="sim-pct-input-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+            _ensure_field_text_state(key, field)
+            st.text_input("\u200b", key=key, label_visibility="collapsed")
+
+    if is_delivery_mix and not is_last_row:
+        st.markdown(
+            '<div class="sim-dd-row-divider" aria-hidden="true" '
+            'style="display:block;width:100%;height:0;margin:0;padding:0;'
+            'border:none;border-top:1px solid #000000;box-sizing:border-box;"></div>',
+            unsafe_allow_html=True,
+        )
 
 
 def render_action_bar(
@@ -2902,16 +4890,13 @@ def _inflation_calculated_display_rows(group_index: int, group: dict[str, Any]) 
     """Build PTC/STC/SWC rows from saved inflation calculation."""
     infl_calc: list[dict[str, Any]] = st.session_state.get(_infl_calc_key(group_index), [])
     rows: list[dict[str, Any]] = []
-    for fi, field in enumerate(group.get("fields", [])):
-        if not _is_inflation_calculated_field(field):
-            continue
-        if infl_calc and fi < len(infl_calc):
-            rows.append({
-                "name": field["name"],
-                "name_tags": field.get("name_tags", []),
-                "value": _field_display_str(field, infl_calc[fi]["effective_total"]),
-                "suffix": field.get("suffix") or "%",
-            })
+    for calc_row in infl_calc:
+        rows.append({
+            "name": calc_row["name"],
+            "name_tags": calc_row.get("name_tags", []),
+            "value": _field_display_str(_INFL_PCT_FIELD, calc_row["effective_total"]),
+            "suffix": "%",
+        })
     return rows
 
 

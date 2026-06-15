@@ -64,3 +64,7 @@ are visible as badges in the original Flask templates and preserved here:
 | Excel export                  | `st.download_button`                      |
 | Status alerts                 | `st.warning` / `st.success` / `st.info`   |
 | Country progress              | `st.progress`                             |
+
+
+
+.\myenv\Scripts\activate

@@ -245,47 +245,7 @@ SIMULATE_CONTEXT_PILLS = [
 # Each group: dict with `tags` (list) and `fields` (list of dicts; each field may have `name_tags`).
 
 def _seed_process_cost_fields() -> list[dict]:
-    sections = (
-        ("PTC", "ptc", (
-            "New set-up / business",
-            "Primary / direct freight price",
-            "Ocean",
-            "Other",
-        )),
-        ("STC", "stc", (
-            "Secondary freight price",
-            "Secondary freight efficiency",
-            "D2C freight efficiency",
-            "Direct effect",
-            "Other variable",
-        )),
-        ("SWC Variable", "swc", (
-            "Indirect labour price",
-            "Other price WH VAR",
-            "Warehouse var efficiency",
-            "Other variable",
-            "Op. exchange rates",
-        )),
-    )
-    fields: list[dict] = []
-    for section_name, section_class, items in sections:
-        fields.append({
-            "name": section_name,
-            "description": "",
-            "field_role": "section",
-            "section_class": section_class,
-            "value": 0, "min": 0, "max": 100, "step": None, "suffix": "%",
-            "name_tags": [],
-        })
-        for item_name in items:
-            fields.append({
-                "name": item_name,
-                "description": "",
-                "field_role": "input",
-                "value": 0, "min": 0, "max": 100, "step": None, "suffix": "%",
-                "name_tags": [],
-            })
-    return fields
+    return []
 
 
 SIMULATE_PARAM_GROUPS = [
@@ -416,7 +376,7 @@ SIMULATE_PARAM_GROUPS = [
         "tags": [
             {"text": "PTC", "class": "ptc"},
             {"text": "STC", "class": "stc"},
-            {"text": "14 fields", "class": "fields"},
+            {"text": "16 rows", "class": "fields"},
         ],
         "fields": _seed_process_cost_fields(),
     },

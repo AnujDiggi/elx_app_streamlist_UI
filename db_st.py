@@ -238,57 +238,46 @@ def _delivery_mix_fields() -> list[dict]:
 
 
 _PROCESS_COST_DB_TITLES = frozenset({"Process cost", "Project Costs (EUR)"})
-_PROCESS_COST_SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("PTC", "ptc", (
-        "New set-up / business",
-        "Primary / direct freight price",
-        "Ocean",
-        "Other",
-    )),
-    ("STC", "stc", (
-        "Secondary freight price",
-        "Secondary freight efficiency",
-        "D2C freight efficiency",
-        "Direct effect",
-        "Other variable",
-    )),
-    ("SWC Variable", "swc", (
-        "Indirect labour price",
-        "Other price WH VAR",
-        "Warehouse var efficiency",
-        "Other variable",
-        "Op. exchange rates",
-    )),
+_PROCESS_COST_COLUMNS: tuple[str, ...] = (
+    "PTC",
+    "STC",
+    "SWC Var",
+    "SWC Fixed",
+    "SWC Obs. fix.",
+)
+_PROCESS_COST_MATRIX_ROWS: tuple[dict, ...] = (
+    {"key": "new_setup", "label": "New set-up / business", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "primary_freight_price", "label": "Primary/direct freight price", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "primary_freight_eff", "label": "Primary/direct freight eff.", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "ocean", "label": "Ocean", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "secondary_freight_price", "label": "Secondary freight price", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "secondary_freight_eff", "label": "Secondary freight eff.", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "d2c_freight_eff", "label": "D2C freight efficiency", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "direct_del_effect", "label": "Direct del effect", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "indirect_labour", "label": "Indirect labour price", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "other_price_wh_var", "label": "Other price WH VAR", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "whse_var_eff", "label": "Whse var efficiency", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "new_stock_policy", "label": "New stock policy", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "other_variable", "label": "Other variable", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "other", "label": "other", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "stk", "label": "STK", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
+    {"key": "op_exch_rates", "label": "Op.exch.rates", "company": "FR10", "defaults": (0, 0, 0, 0, 0)},
 )
 
 
-def _process_cost_field(
-    name: str,
-    *,
-    section: bool = False,
-    section_class: str = "",
-) -> dict:
+def get_process_cost_matrix_config() -> dict:
+    """Column headers and row specs for the process cost matrix UI."""
     return {
-        "name": name,
-        "name_tags": [],
-        "desc": "",
-        "field_role": "section" if section else "input",
-        "section_class": section_class,
-        "value": 0,
-        "min": 0,
-        "max": 100,
-        "step": None,
-        "suffix": "%",
+        "company_label": "Company",
+        "category_label": "Process Changes Cat.",
+        "columns": _PROCESS_COST_COLUMNS,
+        "input_rows": _PROCESS_COST_MATRIX_ROWS,
     }
 
 
 def _process_cost_fields() -> list[dict]:
-    fields: list[dict] = []
-    for section_name, section_class, items in _PROCESS_COST_SECTIONS:
-        fields.append(_process_cost_field(section_name, section=True, section_class=section_class))
-        for item_name in items:
-            fields.append(_process_cost_field(item_name))
-    return fields
+    """Matrix UI replaces legacy section fields — keep empty for compatibility."""
+    return []
 
 
 _INFLATION_VECTOR = (2.0, 3.0, 5.0, 2.0, -1.0, 2.0)
@@ -299,6 +288,88 @@ _INFLATION_IMPACT_WEIGHTS = {
     "SWC fixed": (0, 0, 0, 0, 0, 100),
     "SWC Obs. fix.": (0, 0, 0, 0, 0, 0),
 }
+_INFLATION_COLUMNS = (
+    "Secondary TPT, Fuel",
+    "Secondary TPT, Others",
+    "Primary Fuel",
+    "Primary Others",
+    "Sales Warehouse",
+    "Sales Warehouse Fixed",
+)
+_INFLATION_MATRIX_INPUT_ROWS: tuple[dict, ...] = (
+    {"key": "inflation", "label": "Inflation", "defaults": _INFLATION_VECTOR, "name_tags": []},
+    {
+        "key": "ptc_impact",
+        "label": "PTC Impact",
+        "defaults": _INFLATION_IMPACT_WEIGHTS["PTC"],
+        "name_tags": [{"text": "PTC", "class": "ptc"}],
+    },
+    {
+        "key": "stc_impact",
+        "label": "STC Impact",
+        "defaults": _INFLATION_IMPACT_WEIGHTS["STC"],
+        "name_tags": [{"text": "STC", "class": "stc"}],
+    },
+    {
+        "key": "swc_var_impact",
+        "label": "SWC Var Impact",
+        "defaults": _INFLATION_IMPACT_WEIGHTS["SWC var"],
+        "name_tags": [{"text": "SWC", "class": "swc"}],
+    },
+    {
+        "key": "swc_fixed_impact",
+        "label": "SWC Fixed Impact",
+        "defaults": _INFLATION_IMPACT_WEIGHTS["SWC fixed"],
+        "name_tags": [{"text": "SWC", "class": "swc"}],
+    },
+    {
+        "key": "swc_obs_impact",
+        "label": "SWC Obs. Fix. Impact",
+        "defaults": _INFLATION_IMPACT_WEIGHTS["SWC Obs. fix."],
+        "name_tags": [{"text": "SWC", "class": "swc"}],
+    },
+)
+_INFLATION_MATRIX_CALC_ROWS: tuple[dict, ...] = (
+    {
+        "key": "ptc",
+        "label": "PTC",
+        "impact_key": "ptc_impact",
+        "name_tags": [{"text": "PTC", "class": "ptc"}],
+    },
+    {
+        "key": "stc",
+        "label": "STC",
+        "impact_key": "stc_impact",
+        "name_tags": [{"text": "STC", "class": "stc"}],
+    },
+    {
+        "key": "swc_var",
+        "label": "SWC Var",
+        "impact_key": "swc_var_impact",
+        "name_tags": [{"text": "SWC", "class": "swc"}],
+    },
+    {
+        "key": "swc_fixed",
+        "label": "SWC Fixed",
+        "impact_key": "swc_fixed_impact",
+        "name_tags": [{"text": "SWC", "class": "swc"}],
+    },
+    {
+        "key": "swc_obs",
+        "label": "SWC Obs. Fix.",
+        "impact_key": "swc_obs_impact",
+        "name_tags": [{"text": "SWC", "class": "swc"}],
+    },
+)
+
+
+def get_inflation_matrix_config() -> dict:
+    """Column headers and input/calculated row specs for the inflation matrix UI."""
+    return {
+        "columns": _INFLATION_COLUMNS,
+        "input_rows": _INFLATION_MATRIX_INPUT_ROWS,
+        "calc_rows": _INFLATION_MATRIX_CALC_ROWS,
+    }
 
 
 def _inflation_baseline_total(impact: tuple[int, ...]) -> float:
@@ -464,10 +535,12 @@ def get_simulate_data() -> dict:
             ]
             fields = _inflation_rates_fields()
         elif g_row["title"] in _PROCESS_COST_DB_TITLES:
+            pc_config = get_process_cost_matrix_config()
+            n_rows = len(pc_config["input_rows"])
             tags = [
                 {"text": "PTC", "class": "ptc"},
                 {"text": "STC", "class": "stc"},
-                {"text": "14 fields", "class": "fields"},
+                {"text": f"{n_rows} rows", "class": "fields"},
             ]
             fields = _process_cost_fields()
         else:

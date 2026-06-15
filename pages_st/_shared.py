@@ -227,6 +227,7 @@ div[data-testid="stButton"] button:hover{
     background:#DCE8F2 !important;
     color:#000000 !important;
     border:1px solid #D4DBE6 !important;
+    border-radius:8px !important;
     opacity:1 !important;
 }
 
@@ -362,16 +363,29 @@ input{
     border-radius:0 !important;
 }
 
-.block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"],
-.block-container:has(#simulate-page) [class*="st-key-sim_grp_"],
-.block-container:has(#simulate-page) [class*="st-key-sim_save_"] button,
-.block-container:has(#simulate-page) [class*="st-key-sim_toggle_"] button,
-.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-save-col) div[data-testid="stButton"] button,
-.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-toggle-col) div[data-testid="stButton"] button,
-.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stHorizontalBlock"],
-.block-container:has(#simulate-page) [data-testid="stTextInput"] input,
-.block-container:has(#simulate-page) [data-testid="stTextInput"] > div{
+.block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap),
+.block-container:has(#simulate-page) [class*="st-key-sim_grp_"]{
     border-radius:0 !important;
+}
+
+/* Simulate — parameter % chip row and section Save/chevron: 8px corners */
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stHorizontalBlock"],
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"],
+.block-container:has(#simulate-page) [class*="st-key-sim_f_"] div[data-baseweb="input"],
+.block-container:has(#simulate-page) [class*="st-key-sim_save_"] button,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-save-col) div[data-testid="stButton"] button,
+.block-container:has(#simulate-page) [class*="st-key-sim_toggle_"] button,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-toggle-col) div[data-testid="stButton"] button{
+    border-radius:8px !important;
+}
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-chip-row) div[data-baseweb="input"],
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"],
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-chip-row) [data-testid="stTextInput"] input,
+.block-container:has(#simulate-page) [data-testid="column"]:has(.sim-pct-input-marker) [data-testid="stTextInput"] input{
+    border:none !important;
+    border-radius:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
 }
 
 .block-container:has(#simulate-page) [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div,
