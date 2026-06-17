@@ -224,6 +224,7 @@ def _delivery_mix_fields() -> list[dict]:
     return [
         {
             "name": label,
+            "company_code": code,
             "name_tags": [],
             "desc": "",
             "dd_change": _DELIVERY_MIX_DD_CHANGE[code],
@@ -280,12 +281,12 @@ def _process_cost_fields() -> list[dict]:
     return []
 
 
-_INFLATION_VECTOR = (2.0, 3.0, 5.0, 2.0, -1.0, 2.0)
+_INFLATION_VECTOR = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 _INFLATION_IMPACT_WEIGHTS = {
-    "PTC": (0, 0, 25, 70, 0, 0),
-    "STC": (30, 70, 0, 0, 0, 0),
-    "SWC var": (0, 0, 0, 0, 100, 0),
-    "SWC fixed": (0, 0, 0, 0, 0, 100),
+    "PTC": (0, 0, 0, 0, 0, 0),
+    "STC": (0, 0, 0, 0, 0, 0),
+    "SWC var": (0, 0, 0, 0, 0, 0),
+    "SWC fixed": (0, 0, 0, 0, 0, 0),
     "SWC Obs. fix.": (0, 0, 0, 0, 0, 0),
 }
 _INFLATION_COLUMNS = (
@@ -373,7 +374,7 @@ def get_inflation_matrix_config() -> dict:
 
 
 def _inflation_baseline_total(impact: tuple[int, ...]) -> float:
-    cells = [round(_INFLATION_VECTOR[i] * impact[i] / 100, 1) for i in range(len(_INFLATION_VECTOR))]
+    cells = [round(_INFLATION_VECTOR[i] * impact[i], 1) for i in range(len(_INFLATION_VECTOR))]
     return round(sum(cells), 1)
 
 

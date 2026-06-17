@@ -210,6 +210,11 @@ def inject_filter_select_css() -> None:
             fill: #ffffff !important;
             color: #ffffff !important;
         }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"]:has(input:disabled) > div,
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"][aria-disabled="true"] > div {{
+            opacity: 0.55 !important;
+            cursor: not-allowed !important;
+        }}
 
         [data-testid="column"]:has(.elx-filter-dd):not(:has(.elx-filter-labeled)):not(:has(.elx-filter-panel)) div[data-baseweb="select"] > div {{
             background-color: #F8F9FC !important;
@@ -656,6 +661,9 @@ def filter_select(
     options: list[str] | None = None,
     preset: str | None = None,
     default: str | None = None,
+    placeholder: str | None = "— Select —",
+    disabled: bool = False,
+    on_change=None,
     parent: DeltaGenerator | None = None,
     label_above: str | None = None,
     context_bar: bool = False,
@@ -684,9 +692,16 @@ def filter_select(
     if not opts:
         raise ValueError("filter_select requires options or a valid preset with a default")
 
-    initial = default if default is not None else opts[0]
+    if placeholder:
+        opts = [placeholder, *[o for o in opts if o != placeholder]]
+
     if key not in st.session_state:
-        st.session_state[key] = initial
+        if default is not None and default in opts:
+            st.session_state[key] = default
+        elif placeholder:
+            st.session_state[key] = placeholder
+        else:
+            st.session_state[key] = opts[0]
 
     selected = str(st.session_state[key])
     if selected not in opts:
@@ -718,7 +733,10 @@ def filter_select(
         "index": opts.index(selected),
         "key": key,
         "label_visibility": "collapsed",
+        "disabled": disabled,
     }
+    if on_change is not None:
+        select_kwargs["on_change"] = on_change
     if _SELECTBOX_SUPPORTS_FILTER_MODE:
         select_kwargs["filter_mode"] = None
     target.selectbox("\u200b", **select_kwargs)

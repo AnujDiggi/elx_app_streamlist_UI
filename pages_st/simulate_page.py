@@ -9,6 +9,7 @@ from pages_st.Common_Pages.simulate_ui import (
     inject_css,
     inject_paint_js,
     inject_simulate_layout_css,
+    process_pending_save,
     render_action_bar,
     render_parameter_group,
     render_parameter_panel_header,
@@ -25,6 +26,7 @@ def _render_form_panel(data: dict, groups: list) -> None:
         render_parameter_panel_header(data, groups)
         for idx, group in enumerate(groups):
             render_parameter_group(group, idx, groups)
+        process_pending_save(groups)
         render_action_bar(data, groups)
 
 

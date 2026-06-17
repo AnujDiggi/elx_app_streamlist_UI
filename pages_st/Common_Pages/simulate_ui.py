@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from functools import partial
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -26,7 +27,7 @@ _DANGER = "#DC2626"
 _BORDER = "#E5E7EB"
 _SECTION_BORDER = "#C3C3C3"
 _SIDE_SUBMIT_BORDER = "#DDE2E9"
-_SIDE_CARD_RADIUS = "8px"
+_SIDE_CARD_RADIUS = "12px"
 _SIDE_CARD_GAP = "12px"
 _SIDE_PANEL_W = 330
 _MAIN_COL_GAP = "16px"
@@ -52,7 +53,8 @@ _TAG = {
     "entered": ("#fef3c7", "#b45309"),
 }
 
-_INFL_CSS_VERSION = 32
+_INFL_CSS_VERSION = 40
+_INFL_CALC_CAPTION_COLOR = "#021632"
 _PCT_CHIP_MIN_W = "76px"
 _PCT_CHIP_MAX_W = "100px"
 _PCT_CHIP_H = "40px"
@@ -62,7 +64,7 @@ _PC_CHIP_MIN_W = "84px"
 _PC_CHIP_MAX_W = "108px"
 _PC_CHIP_H = "36px"
 _PC_TOTAL_ROW_H = "44px"
-_PC_TOTAL_BG = "#E8EEF7"
+_PC_TOTAL_BG = "#D4DFE9"
 _INFL_PCT_CHIP_MIN_W = _PCT_CHIP_MIN_W
 _INFL_PCT_CHIP_MAX_W = _PCT_CHIP_MAX_W
 
@@ -91,24 +93,176 @@ _SCOPE_VALUE_KEY = "sim_panel_scope_value"
 _SCOPE_INIT_KEY = "sim_panel_scope_initialized"
 _SCOPE_PICK_QP = "scope_pick"
 
-_PANEL_HEADER_FILTERS: tuple[dict[str, str], ...] = (
-    {"label": "Business Area", "key": "sim_panel_business_area", "preset": "Business Area", "default": "Europe"},
-    {"label": "Commercial Area", "key": "sim_panel_commercial_area", "preset": "Commercial Area", "default": "ATED"},
-    {"label": "Country", "key": "sim_panel_country", "preset": "Panel Country", "default": "Germany"},
-    {"label": "Period", "key": "sim_panel_period", "preset": "Panel Period", "default": "Last 6 months"},
-    {"label": "Company", "key": "sim_panel_company", "preset": "Panel Company", "default": "FR10"},
+_PANEL_FILTER_PLACEHOLDER = "— Select —"
+_PANEL_PERIOD_KEY = "sim_panel_period"
+_PANEL_FILTERS_VER_KEY = "sim_panel_filters_ver"
+_PANEL_FILTERS_VERSION = 2
+_PANEL_HEADER_FILTERS: tuple[dict[str, Any], ...] = (
+    {"label": "Period", "key": "sim_panel_period", "preset": "Panel Period", "requires_period": False},
+    {"label": "Business Area", "key": "sim_panel_business_area", "preset": "Business Area", "requires_period": True},
+    {"label": "Commercial Area", "key": "sim_panel_commercial_area", "preset": "Commercial Area", "requires_period": True},
+    {"label": "Country", "key": "sim_panel_country", "preset": "Panel Country", "requires_period": True},
+    {"label": "Company", "key": "sim_panel_company", "preset": "Panel Company", "requires_period": True},
+)
+_PLANNING_FILTER_KEYS: tuple[str, ...] = tuple(
+    spec["key"] for spec in _PANEL_HEADER_FILTERS if spec.get("requires_period")
 )
 _PANEL_COMPANY_KEY = "sim_panel_company"
+_DELIVERY_MIX_DIMENSIONS: tuple[tuple[str, str], ...] = (
+    ("business_area", "sim_panel_business_area"),
+    ("commercial_area", "sim_panel_commercial_area"),
+    ("country", "sim_panel_country"),
+    ("company", "sim_panel_company"),
+)
+_DM_PCT_FIELD: dict[str, Any] = {
+    "value": 0,
+    "min": 0,
+    "max": 100,
+    "step": None,
+    "suffix": "%",
+}
+
+
+def _panel_period_selected() -> bool:
+    val = str(st.session_state.get(_PANEL_PERIOD_KEY, _PANEL_FILTER_PLACEHOLDER))
+    return val != _PANEL_FILTER_PLACEHOLDER
+
+
+def _panel_company_selected() -> bool:
+    return bool(_panel_filter_value(_PANEL_COMPANY_KEY))
+
+
+def _reset_dependent_panel_filters() -> None:
+    for spec in _PANEL_HEADER_FILTERS:
+        if spec.get("requires_period"):
+            st.session_state[spec["key"]] = _PANEL_FILTER_PLACEHOLDER
+
+
+def _on_panel_period_changed() -> None:
+    if not _panel_period_selected():
+        _reset_dependent_panel_filters()
+
+
+def _active_planning_filter_key() -> str | None:
+    """Which planning dropdown (BA / Commercial / Country / Company) has a value."""
+    active: str | None = None
+    for key in _PLANNING_FILTER_KEYS:
+        if _panel_filter_value(key):
+            active = key
+    return active
+
+
+def _enforce_single_planning_filter() -> None:
+    """Only one planning dimension may be selected at a time."""
+    active: str | None = None
+    for key in _PLANNING_FILTER_KEYS:
+        if not _panel_filter_value(key):
+            continue
+        if active is None:
+            active = key
+        else:
+            st.session_state[key] = _PANEL_FILTER_PLACEHOLDER
+
+
+def _on_planning_filter_changed(changed_key: str) -> None:
+    """When one planning filter is set, clear the other three."""
+    if not _panel_filter_value(changed_key):
+        return
+    for key in _PLANNING_FILTER_KEYS:
+        if key != changed_key:
+            st.session_state[key] = _PANEL_FILTER_PLACEHOLDER
+
+
+def _is_panel_filter_disabled(spec: dict[str, Any], *, period_enabled: bool) -> bool:
+    key = spec["key"]
+    if key == _PANEL_PERIOD_KEY:
+        return False
+    if not period_enabled:
+        return True
+    active = _active_planning_filter_key()
+    if active and key in _PLANNING_FILTER_KEYS and key != active:
+        return True
+    return False
+
+
+def _ensure_panel_filter_state() -> None:
+    if st.session_state.get(_PANEL_FILTERS_VER_KEY) == _PANEL_FILTERS_VERSION:
+        return
+    for spec in _PANEL_HEADER_FILTERS:
+        st.session_state[spec["key"]] = _PANEL_FILTER_PLACEHOLDER
+    st.session_state[_PANEL_FILTERS_VER_KEY] = _PANEL_FILTERS_VERSION
 
 
 def _selected_panel_company() -> str:
     """Company code from the panel header Company dropdown."""
-    default = "FR10"
+    val = _panel_filter_value(_PANEL_COMPANY_KEY)
+    return val or _PANEL_FILTER_PLACEHOLDER
+
+
+def _panel_filter_value(key: str) -> str:
     for spec in _PANEL_HEADER_FILTERS:
-        if spec["key"] == _PANEL_COMPANY_KEY:
-            default = spec["default"]
-            break
-    return str(st.session_state.get(_PANEL_COMPANY_KEY, default))
+        if spec["key"] == key:
+            val = str(st.session_state.get(key, _PANEL_FILTER_PLACEHOLDER))
+            return "" if val == _PANEL_FILTER_PLACEHOLDER else val
+    return ""
+
+
+def _deepest_planning_filter_spec() -> dict[str, Any] | None:
+    """Most specific planning dimension with a selected value (BA → Commercial → Country → Company)."""
+    deepest: dict[str, Any] | None = None
+    for spec in _PANEL_HEADER_FILTERS:
+        if spec["key"] == _PANEL_PERIOD_KEY:
+            continue
+        if _panel_filter_value(spec["key"]):
+            deepest = spec
+    return deepest
+
+
+def _build_hierarchy_level_rows() -> list[dict[str, str]]:
+    """Sidebar hierarchy card — one row per selected panel filter."""
+    rows: list[dict[str, str]] = []
+    period_val = _panel_filter_value(_PANEL_PERIOD_KEY)
+    if period_val:
+        rows.append({"name": "Period", "value": period_val})
+    deepest = _deepest_planning_filter_spec()
+    if deepest:
+        rows.append({"name": "Planning Level", "value": deepest["label"]})
+    for spec in _PANEL_HEADER_FILTERS:
+        if spec["key"] == _PANEL_PERIOD_KEY:
+            continue
+        val = _panel_filter_value(spec["key"])
+        if val:
+            rows.append({"name": spec["label"], "value": val})
+    return rows
+
+
+def _delivery_mix_rows(group: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """One DD% row per selected panel filter (Business Area, Commercial Area, Country, Company)."""
+    if not _panel_period_selected():
+        return []
+    company = _panel_filter_value(_PANEL_COMPANY_KEY)
+    rows: list[tuple[int, dict[str, Any]]] = []
+    for fi, (dim_key, panel_key) in enumerate(_DELIVERY_MIX_DIMENSIONS):
+        label = _panel_filter_value(panel_key)
+        if not label:
+            continue
+        dd_change = (
+            int(db_st._DELIVERY_MIX_DD_CHANGE.get(company, 0))
+            if dim_key == "company"
+            else 0
+        )
+        rows.append((
+            fi,
+            {
+                **_DM_PCT_FIELD,
+                "name": label,
+                "dim_key": dim_key,
+                "name_tags": [],
+                "desc": "",
+                "dd_change": dd_change,
+            },
+        ))
+    return rows
 
 
 def _html(fragment: str) -> None:
@@ -873,6 +1027,16 @@ def inject_css() -> None:
             background: #ffffff !important;
             box-sizing: border-box !important;
             width: 100% !important;
+            display: flex !important;
+            min-height: calc({_PCT_CHIP_H} + 20px) !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker):not(:has(.sim-field-row-last)):not(:has(.sim-section-header-marker)),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker):not(:has(.sim-field-row-last)):not(:has(.sim-section-header-marker)) {{
+            border-bottom: 1px solid #000000 !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-last),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-last) {{
+            border-bottom: none !important;
         }}
         hr.sim-dd-row-divider,
         div.sim-dd-row-divider {{
@@ -904,6 +1068,77 @@ def inject_css() -> None:
             margin: 0 !important;
             padding: 0 !important;
             overflow: hidden !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker):not(:has(.sim-section-header-marker)) > [data-testid="column"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker):not(:has(.sim-section-header-marker)) > [data-testid="column"] {{
+            display: flex !important;
+            align-items: center !important;
+            min-height: {_PCT_CHIP_H} !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:first-child,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:first-child {{
+            justify-content: flex-start !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child {{
+            justify-content: flex-end !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"] > [data-testid="stVerticalBlock"] {{
+            justify-content: center !important;
+            gap: 0 !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"] [data-testid="stElementContainer"],
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"] [data-testid="stMarkdownContainer"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"] [data-testid="stElementContainer"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"] [data-testid="stMarkdownContainer"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: inherit !important;
+            width: 100% !important;
+            min-height: {_PCT_CHIP_H} !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            gap: 0 !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child [data-testid="stVerticalBlock"],
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child [data-testid="stElementContainer"],
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child [data-testid="stMarkdownContainer"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child [data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child [data-testid="stElementContainer"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) [data-testid="stHorizontalBlock"]:has(.sim-field-row-marker) > [data-testid="column"]:last-child [data-testid="stMarkdownContainer"] {{
+            justify-content: flex-end !important;
+        }}
+        .sim-dd-row-label {{
+            display: flex !important;
+            align-items: center !important;
+            min-height: {_PCT_CHIP_H} !important;
+            font-size: 13px !important;
+            font-weight: 700 !important;
+            color: {_PRIMARY} !important;
+            line-height: 1.3 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [class*="st-key-sim_grp_"]:has(.sim-delivery-mix-wrap) .sim-pct-chip-readonly,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-delivery-mix-wrap) .sim-pct-chip-readonly {{
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: {_PCT_CHIP_GAP} !important;
+            min-width: {_PCT_CHIP_MIN_W} !important;
+            max-width: {_PCT_CHIP_MAX_W} !important;
+            min-height: {_PCT_CHIP_H} !important;
+            height: {_PCT_CHIP_H} !important;
+            padding: {_PCT_CHIP_PAD} !important;
+            margin-left: auto !important;
+            margin-right: 0 !important;
+            background: {_INPUT_BG} !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
         }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-param-group-wrap):not(:has(.sim-delivery-mix-wrap)) [data-testid="stElementContainer"]:has(.sim-field-row-marker):last-of-type
         + [data-testid="stHorizontalBlock"] {{
@@ -1289,6 +1524,14 @@ def inject_css() -> None:
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) [data-testid="column"],
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) [data-testid="stMarkdownContainer"],
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) .stHtml,
+        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-card-marker),
+        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-submit-marker),
+        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) {{
+            border: 1px solid {_SIDE_SUBMIT_BORDER} !important;
+            border-radius: {_SIDE_CARD_RADIUS} !important;
+            overflow: hidden !important;
+            box-shadow: none !important;
+        }}
         .block-container:has(#simulate-page) [class*="st-key-sim_side_"] {{
             background: {_CARD_BG} !important;
             background-color: {_CARD_BG} !important;
@@ -1374,11 +1617,54 @@ def inject_css() -> None:
         .sim-infl-row-marker {{ display: none !important; }}
         .sim-infl-header-marker {{ display: none !important; }}
         .sim-infl-calc-row-marker {{ display: none !important; }}
+        .sim-infl-calc-caption-marker {{ display: none !important; }}
+        .sim-infl-calc-caption-wrap {{
+            display: block !important;
+            margin: 20px 0 4px 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+        }}
         .sim-infl-calc-caption {{
-            margin: 20px 0 0;
-            font-size: 12px;
-            font-weight: 600;
-            color: {_TEXT_MUTED};
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            color: {_INFL_CALC_CAPTION_COLOR} !important;
+            line-height: 1.4 !important;
+            visibility: visible !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="stElementContainer"]:has(.sim-infl-calc-caption-wrap),
+        [class*="st-key-sim_grp_"] [data-testid="stMarkdownContainer"]:has(.sim-infl-calc-caption-wrap),
+        [data-testid="stElementContainer"]:has(.sim-infl-calc-caption-wrap),
+        [data-testid="stMarkdownContainer"]:has(.sim-infl-calc-caption-wrap) {{
+            display: block !important;
+            margin: 20px 0 4px 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            height: auto !important;
+            min-height: 0 !important;
+            background: transparent !important;
+        }}
+        [class*="st-key-sim_grp_"] [data-testid="stMarkdownContainer"]:has(.sim-infl-calc-caption-wrap) p {{
+            margin: 0 !important;
+            padding: 0 !important;
+            color: {_INFL_CALC_CAPTION_COLOR} !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            line-height: 1.4 !important;
+        }}
+        [class*="st-key-sim_infl_input_"] + [data-testid="stElementContainer"]:has(.sim-infl-calc-caption-wrap),
+        [data-testid="stElementContainer"]:has(.sim-infl-calc-caption-wrap) + [class*="st-key-sim_infl_calc_table_"],
+        [data-testid="stElementContainer"]:has(.sim-infl-calc-caption-wrap) + [data-testid="stVerticalBlockBorderWrapper"]:has([class*="st-key-sim_infl_calc_table_"]) {{
+            margin-top: 0 !important;
+        }}
+        [class*="st-key-sim_infl_calc_table_"] {{
+            border: 1px solid #E5E7EB !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+            margin-top: 0 !important;
+            background: #ffffff !important;
         }}
         [data-testid="stElementContainer"]:has(.sim-infl-table-wrap-marker) {{
             border: 1px solid #E5E7EB !important;
@@ -1388,8 +1674,7 @@ def inject_css() -> None:
             padding: 0 !important;
             background: #ffffff !important;
         }}
-        [class*="st-key-sim_infl_input_"],
-        [class*="st-key-sim_infl_calc_table_"] {{
+        [class*="st-key-sim_infl_input_"] {{
             border: 1px solid #E5E7EB !important;
             border-radius: 8px !important;
             overflow: hidden !important;
@@ -1902,7 +2187,7 @@ def inject_paint_js() -> None:
               wrapper.style.setProperty("background-color", white, "important");
               wrapper.style.setProperty("background", white, "important");
               wrapper.style.setProperty("border", "1px solid #DDE2E9", "important");
-              wrapper.style.setProperty("border-radius", "8px", "important");
+              wrapper.style.setProperty("border-radius", "12px", "important");
               wrapper.style.setProperty("padding", "0", "important");
               wrapper.style.setProperty("margin-left", "0", "important");
               wrapper.style.setProperty("margin-right", "0", "important");
@@ -2064,6 +2349,35 @@ def inject_paint_js() -> None:
                   vb.style.setProperty("margin", "0", "important");
                 }
               });
+            });
+            doc.querySelectorAll(".sim-infl-calc-caption-wrap").forEach((wrap) => {
+              wrap.style.setProperty("display", "block", "important");
+              wrap.style.setProperty("margin", "20px 0 4px 0", "important");
+              wrap.style.setProperty("padding", "0", "important");
+              wrap.style.setProperty("overflow", "visible", "important");
+              const ec = wrap.closest('[data-testid="stElementContainer"]');
+              if (ec) {
+                ec.style.setProperty("display", "block", "important");
+                ec.style.setProperty("margin", "20px 0 4px 0", "important");
+                ec.style.setProperty("padding", "0", "important");
+                ec.style.setProperty("overflow", "visible", "important");
+                ec.style.setProperty("height", "auto", "important");
+                ec.style.setProperty("background", "transparent", "important");
+              }
+              wrap.querySelectorAll(".sim-infl-calc-caption").forEach((cap) => {
+                cap.style.setProperty("margin", "0", "important");
+                cap.style.setProperty("font-size", "14px", "important");
+                cap.style.setProperty("font-weight", "700", "important");
+                cap.style.setProperty("color", "#021632", "important");
+                cap.style.setProperty("line-height", "1.4", "important");
+                cap.style.setProperty("visibility", "visible", "important");
+              });
+            });
+            doc.querySelectorAll('[class*="st-key-sim_infl_calc_table_"]').forEach((box) => {
+              const parent = box.parentElement;
+              if (parent && parent.querySelector(".sim-infl-calc-caption-wrap")) {
+                box.style.setProperty("margin-top", "0", "important");
+              }
             });
             doc.querySelectorAll(".sim-pct-chip-readonly").forEach((chip) => {
               const inParam = chip.closest('[class*="st-key-sim_f_"]');
@@ -2259,9 +2573,23 @@ def inject_paint_js() -> None:
               wrap.style.setProperty("padding", "0 8px", "important");
               wrap.style.setProperty("margin-left", "auto", "important");
               wrap.style.setProperty("margin-right", "auto", "important");
-              wrap.style.setProperty("background", "#ffffff", "important");
-              wrap.style.setProperty("border", "1px solid #D4DBE6", "important");
+              wrap.style.setProperty("background", inputBg, "important");
+              wrap.style.setProperty("background-color", inputBg, "important");
+              wrap.style.setProperty("border", inputBorder, "important");
               wrap.style.setProperty("border-radius", "8px", "important");
+              wrap.style.setProperty("box-shadow", "none", "important");
+              wrap.style.setProperty("overflow", "hidden", "important");
+              wrap.querySelectorAll(":scope > div").forEach((inner) => {
+                inner.style.setProperty("display", "flex", "important");
+                inner.style.setProperty("align-items", "center", "important");
+                inner.style.setProperty("justify-content", "center", "important");
+                inner.style.setProperty("width", "100%", "important");
+                inner.style.setProperty("height", "100%", "important");
+                inner.style.setProperty("background", "transparent", "important");
+                inner.style.setProperty("background-color", "transparent", "important");
+                inner.style.setProperty("border", "none", "important");
+                inner.style.setProperty("box-shadow", "none", "important");
+              });
               wrap.querySelectorAll("input").forEach((input) => {
                 input.style.setProperty("text-align", "center", "important");
                 input.style.setProperty("font-size", "12px", "important");
@@ -2269,8 +2597,10 @@ def inject_paint_js() -> None:
                 input.style.setProperty("color", "#011E41", "important");
                 input.style.setProperty("border", "none", "important");
                 input.style.setProperty("background", "transparent", "important");
+                input.style.setProperty("background-color", "transparent", "important");
                 input.style.setProperty("width", "100%", "important");
                 input.style.setProperty("padding", "0", "important");
+                input.style.setProperty("box-shadow", "none", "important");
               });
             });
             doc.querySelectorAll(".sim-pc-value-chip").forEach((chip) => {
@@ -2285,9 +2615,14 @@ def inject_paint_js() -> None:
               chip.style.setProperty("margin", "0 auto", "important");
               chip.style.setProperty("white-space", "nowrap", "important");
               if (chip.classList.contains("sim-pc-total-chip")) {
-                chip.style.setProperty("background", "#E8EEF7", "important");
+                chip.style.setProperty("background", "#D4DFE9", "important");
+                chip.style.setProperty("background-color", "#D4DFE9", "important");
                 chip.style.setProperty("font-weight", "700", "important");
-                chip.style.setProperty("border", "none", "important");
+                chip.style.setProperty("border", inputBorder, "important");
+              } else {
+                chip.style.setProperty("background", inputBg, "important");
+                chip.style.setProperty("background-color", inputBg, "important");
+                chip.style.setProperty("border", inputBorder, "important");
               }
               const md = chip.closest('[data-testid="stMarkdownContainer"]');
               if (md) {
@@ -2342,6 +2677,7 @@ def inject_paint_js() -> None:
               if (!root) return;
               root.querySelectorAll('[data-testid="stHorizontalBlock"]:has(.sim-field-row-marker)').forEach((row) => {
                 if (row.querySelector(".sim-section-header-marker")) return;
+                const isLast = Boolean(row.querySelector(".sim-field-row-last"));
                 row.style.setProperty("padding", "10px", "important");
                 row.style.setProperty("margin", "0", "important");
                 row.style.setProperty("gap", "8px", "important");
@@ -2350,6 +2686,48 @@ def inject_paint_js() -> None:
                 row.style.setProperty("width", "100%", "important");
                 row.style.setProperty("background", "#ffffff", "important");
                 row.style.setProperty("display", "flex", "important");
+                row.style.setProperty("min-height", "60px", "important");
+                row.style.setProperty("border-bottom", isLast ? "none" : "1px solid #000000", "important");
+                row.querySelectorAll(':scope > [data-testid="column"]').forEach((col, idx) => {
+                  col.style.setProperty("display", "flex", "important");
+                  col.style.setProperty("align-items", "center", "important");
+                  col.style.setProperty("min-height", "40px", "important");
+                  col.style.setProperty("justify-content", idx === 0 ? "flex-start" : "flex-end", "important");
+                  col.querySelectorAll('[data-testid="stVerticalBlock"]').forEach((vb) => {
+                    vb.style.setProperty("display", "flex", "important");
+                    vb.style.setProperty("flex-direction", "column", "important");
+                    vb.style.setProperty("align-items", idx === 0 ? "flex-start" : "flex-end", "important");
+                    vb.style.setProperty("justify-content", "center", "important");
+                    vb.style.setProperty("width", "100%", "important");
+                    vb.style.setProperty("min-height", "40px", "important");
+                    vb.style.setProperty("margin", "0", "important");
+                    vb.style.setProperty("padding", "0", "important");
+                    vb.style.setProperty("gap", "0", "important");
+                  });
+                  col.querySelectorAll('[data-testid="stElementContainer"], [data-testid="stMarkdownContainer"]').forEach((el) => {
+                    if (el.querySelector(".sim-field-row-marker")) return;
+                    el.style.setProperty("display", "flex", "important");
+                    el.style.setProperty("align-items", "center", "important");
+                    el.style.setProperty("justify-content", idx === 0 ? "flex-start" : "flex-end", "important");
+                    el.style.setProperty("width", "100%", "important");
+                    el.style.setProperty("min-height", "40px", "important");
+                    el.style.setProperty("margin", "0", "important");
+                    el.style.setProperty("padding", "0", "important");
+                  });
+                });
+              });
+              root.querySelectorAll(".sim-dd-row-label").forEach((label) => {
+                label.style.setProperty("display", "flex", "important");
+                label.style.setProperty("align-items", "center", "important");
+                label.style.setProperty("min-height", "40px", "important");
+                label.style.setProperty("margin", "0", "important");
+                label.style.setProperty("padding", "0", "important");
+              });
+              root.querySelectorAll(".sim-pct-input-marker").forEach((marker) => {
+                const col = marker.closest('[data-testid="column"]');
+                if (!col || !root.contains(col)) return;
+                const wrap = col.querySelector('div[data-baseweb="input"]');
+                if (wrap) paintPctInputChip(wrap);
               });
               root.querySelectorAll(".sim-dd-row-divider").forEach((line) => {
                 line.style.setProperty("display", "block", "important");
@@ -2738,6 +3116,8 @@ def _iter_input_fields(group: dict[str, Any]) -> list[tuple[int, dict[str, Any]]
             (idx, {**fake_field, "_pc_row": row["key"]})
             for idx, row in enumerate(config["input_rows"])
         ]
+    if _is_delivery_mix_group(group):
+        return _delivery_mix_rows(group)
     return [
         (fi, field)
         for fi, field in enumerate(group.get("fields", []))
@@ -2821,6 +3201,7 @@ _SIM_RUN_KEY = "simulation_run"
 _SIM_SNAPSHOT_KEY = "simulation_snapshot"
 _SIM_HISTORY_KEY = "sim_submission_history"
 _RESET_KEY = "sim_reset_requested"
+_PENDING_SAVE_KEY = "sim_pending_save_group"
 _SIDE_GAP_GEN_KEY = "sim_side_gap_gen"
 _STATUS_LABELS = (
     ("DD% (4 fields)", 0),
@@ -2893,19 +3274,71 @@ def _ensure_field_text_state(key: str, field: dict[str, Any]) -> None:
         st.session_state[key] = _field_display_str(field, st.session_state[key])
 
 
+def _infl_draft_key(group_index: int, row_key: str, col: int) -> str:
+    return f"sim_infl_draft_{group_index}_{row_key}_{col}"
+
+
+def _infl_value_from_state(raw: Any, default: float) -> float:
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    parsed = _parse_infl_cell_text(str(raw))
+    return float(default if parsed is None else parsed)
+
+
+def _infl_matrix_raw_value(group_index: int, row_key: str, col: int) -> float:
+    """Read a matrix cell from widget, draft, or saved state."""
+    default = _infl_matrix_default(row_key, col)
+    key = _infl_matrix_key(group_index, row_key, col)
+    saved_key = _infl_matrix_saved_key(group_index, row_key, col)
+    draft_key = _infl_draft_key(group_index, row_key, col)
+    if _group_is_saved(group_index):
+        state_keys = (saved_key, key, draft_key)
+    else:
+        state_keys = (key, draft_key, saved_key)
+    for state_key in state_keys:
+        if state_key not in st.session_state:
+            continue
+        return _infl_value_from_state(st.session_state[state_key], default)
+    return float(default)
+
+
+def _infl_matrix_persist_value(group_index: int, row_key: str, col: int) -> float:
+    """Read live widget value for Save — widget state wins over stale drafts."""
+    default = _infl_matrix_default(row_key, col)
+    key = _infl_matrix_key(group_index, row_key, col)
+    draft_key = _infl_draft_key(group_index, row_key, col)
+    for state_key in (key, draft_key):
+        if state_key not in st.session_state:
+            continue
+        return _infl_value_from_state(st.session_state[state_key], default)
+    return float(default)
+
+
+def _sync_infl_draft_cell(group_index: int, row_key: str, col: int) -> None:
+    key = _infl_matrix_key(group_index, row_key, col)
+    draft_key = _infl_draft_key(group_index, row_key, col)
+    default = _infl_matrix_default(row_key, col)
+    raw = st.session_state.get(key, "")
+    st.session_state[draft_key] = _infl_display_str(_infl_value_from_state(raw, default))
+
+
+def _capture_infl_matrix_drafts(group_index: int) -> None:
+    config = db_st.get_inflation_matrix_config()
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            _sync_infl_draft_cell(group_index, row["key"], col)
+
+
 def _persist_infl_matrix_displays(index: int) -> None:
     config = db_st.get_inflation_matrix_config()
     for row in config["input_rows"]:
         for col in range(len(config["columns"])):
-            key = _infl_matrix_key(index, row["key"], col)
-            raw = st.session_state.get(key, "")
-            parsed = _parse_infl_cell_text(str(raw))
-            default = _infl_matrix_default(row["key"], col)
-            value = parsed if parsed is not None else default
+            value = _infl_matrix_persist_value(index, row["key"], col)
             display = _infl_display_str(value)
             saved_key = _infl_matrix_saved_key(index, row["key"], col)
+            draft_key = _infl_draft_key(index, row["key"], col)
             st.session_state[saved_key] = display
-            st.session_state[key] = display
+            st.session_state[draft_key] = display
 
 
 def _persist_pc_matrix_displays(index: int) -> None:
@@ -2920,7 +3353,6 @@ def _persist_pc_matrix_displays(index: int) -> None:
             display = _pc_display_str(value)
             saved_key = _pc_matrix_saved_key(index, row["key"], col)
             st.session_state[saved_key] = display
-            st.session_state[key] = display
 
 
 def _persist_group_field_displays(index: int, group: dict[str, Any]) -> None:
@@ -2931,6 +3363,12 @@ def _persist_group_field_displays(index: int, group: dict[str, Any]) -> None:
     if _is_process_cost_group(group):
         _persist_pc_matrix_displays(index)
         return
+    if _is_delivery_mix_group(group):
+        for fi, field in _delivery_mix_rows(group):
+            value = _delivery_mix_persist_value(index, fi, field)
+            display = _field_display_str(field, value)
+            st.session_state[_saved_display_key(index, fi)] = display
+        return
     for fi, field in enumerate(group.get("fields", [])):
         if _is_inflation_calculated_field(field):
             continue
@@ -2940,7 +3378,6 @@ def _persist_group_field_displays(index: int, group: dict[str, Any]) -> None:
         value = parsed if parsed is not None else field["value"]
         display = _field_display_str(field, value)
         st.session_state[_saved_display_key(index, fi)] = display
-        st.session_state[key] = display
 
 
 def _saved_field_display(group_index: int, field_index: int, field: dict[str, Any]) -> str:
@@ -2965,6 +3402,38 @@ def _dm_calc_key(group_index: int) -> str:
     return f"sim_dm_calc_{group_index}"
 
 
+def _dm_staged_key(group_index: int) -> str:
+    return f"sim_dm_staged_{group_index}"
+
+
+def _sync_dm_field_staged(
+    group_index: int,
+    field_index: int,
+    field: dict[str, Any],
+) -> None:
+    """Keep non-widget staging keys in sync while the user edits DD%."""
+    key = _field_key(group_index, field_index)
+    parsed = _parse_field_text(field, str(st.session_state.get(key, "")))
+    if parsed is None:
+        return
+    staged = dict(st.session_state.get(_dm_staged_key(group_index), {}))
+    staged[field_index] = int(parsed)
+    st.session_state[_dm_staged_key(group_index)] = staged
+
+
+def _capture_dm_staged_values(group_index: int, group: dict[str, Any]) -> None:
+    """Copy live DD% widget values into non-widget staging keys (safe after render)."""
+    staged: dict[int, int] = dict(st.session_state.get(_dm_staged_key(group_index), {}))
+    for fi, field in _delivery_mix_rows(group):
+        key = _field_key(group_index, fi)
+        if key not in st.session_state:
+            continue
+        parsed = _parse_field_text(field, str(st.session_state[key]))
+        if parsed is not None:
+            staged[fi] = int(parsed)
+    st.session_state[_dm_staged_key(group_index)] = staged
+
+
 def _is_delivery_mix_group(group: dict[str, Any]) -> bool:
     return group.get("title") == _DELIVERY_MIX_TITLE
 
@@ -2974,13 +3443,75 @@ def _delivery_mix_effective_dd(dd_change: int | float, user_input: int | float) 
     return max(0, min(100, int(round(dd_change + user_input))))
 
 
+def _delivery_mix_persist_value(
+    group_index: int,
+    field_index: int,
+    field: dict[str, Any],
+) -> int:
+    """Read live widget value for Save — never write back to the widget key."""
+    staged: dict[int, int] = st.session_state.get(_dm_staged_key(group_index), {})
+    if field_index in staged:
+        return int(staged[field_index])
+    key = _field_key(group_index, field_index)
+    saved_key = _saved_display_key(group_index, field_index)
+    default = int(field["value"])
+    for state_key in (key, saved_key):
+        if state_key not in st.session_state:
+            continue
+        parsed = _parse_field_text(field, str(st.session_state[state_key]))
+        if parsed is not None:
+            return int(parsed)
+    return default
+
+
+def _delivery_mix_user_input(
+    group_index: int,
+    field_index: int,
+    field: dict[str, Any],
+) -> int:
+    """Read DD% adjustment from widget or saved display."""
+    staged: dict[int, int] = st.session_state.get(_dm_staged_key(group_index), {})
+    if field_index in staged:
+        return int(staged[field_index])
+    key = _field_key(group_index, field_index)
+    saved_key = _saved_display_key(group_index, field_index)
+    default = int(field["value"])
+    if _group_is_saved(group_index):
+        state_keys = (saved_key, key)
+    else:
+        state_keys = (key, saved_key)
+    for state_key in state_keys:
+        if state_key not in st.session_state:
+            continue
+        parsed = _parse_field_text(field, str(st.session_state[state_key]))
+        if parsed is not None:
+            return int(parsed)
+    return default
+
+
+def _dm_calc_row_for_field(
+    calc_rows: list[dict[str, Any]],
+    field_index: int,
+    group_index: int,
+    group: dict[str, Any],
+) -> dict[str, Any] | None:
+    for row in calc_rows:
+        if row.get("field_index") == field_index:
+            return row
+    for row_idx, (fi, _field) in enumerate(_delivery_mix_rows(group)):
+        if fi == field_index and row_idx < len(calc_rows):
+            return calc_rows[row_idx]
+    return None
+
+
 def _compute_delivery_mix(group_index: int, group: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for fi, field in enumerate(group.get("fields", [])):
-        key = _field_key(group_index, fi)
-        user_input = _field_numeric_value(field, key)
+    for fi, field in _delivery_mix_rows(group):
+        user_input = _delivery_mix_user_input(group_index, fi, field)
         dd_change = int(field.get("dd_change", 0))
         rows.append({
+            "field_index": fi,
+            "dimension": field.get("dim_key", ""),
             "company": field["name"],
             "dd_change": dd_change,
             "user_input": int(user_input),
@@ -2997,10 +3528,10 @@ def _delivery_mix_field_value(
 ) -> int:
     """Resolved DD% for snapshots — uses saved calculation when available."""
     calc_rows: list[dict[str, Any]] = st.session_state.get(_dm_calc_key(group_index), [])
-    if calc_rows and field_index < len(calc_rows):
-        return int(calc_rows[field_index]["effective_dd"])
-    key = _field_key(group_index, field_index)
-    user_input = _field_numeric_value(field, key)
+    calc_row = _dm_calc_row_for_field(calc_rows, field_index, group_index, group)
+    if calc_row is not None:
+        return int(calc_row["effective_dd"])
+    user_input = _delivery_mix_user_input(group_index, field_index, field)
     return _delivery_mix_effective_dd(field.get("dd_change", 0), user_input)
 
 
@@ -3016,7 +3547,7 @@ def _is_process_cost_group(group: dict[str, Any]) -> bool:
     return group.get("title") in _PROCESS_COST_TITLES
 
 
-_INFL_MATRIX_VERSION = 2
+_INFL_MATRIX_VERSION = 5
 _PC_MATRIX_VERSION = 2
 _INFL_PCT_FIELD = {"value": 0.0, "min": None, "max": None, "step": 0.1}
 _PC_INT_FIELD = {"value": 0, "min": None, "max": None, "step": None}
@@ -3046,8 +3577,8 @@ def _infl_matrix_ver_key(group_index: int) -> str:
 
 
 def _parse_infl_cell_text(raw: str) -> float | None:
-    text = (raw or "").strip().replace("%", "")
-    if not text:
+    text = (raw or "").strip().replace("%", "").replace(",", "")
+    if not text or text == "-":
         return None
     try:
         return round(float(text), 1)
@@ -3055,28 +3586,36 @@ def _parse_infl_cell_text(raw: str) -> float | None:
         return None
 
 
-def _ensure_infl_matrix_cell_state(group_index: int, row_key: str, col: int) -> None:
-    key = _infl_matrix_key(group_index, row_key, col)
+def _ensure_infl_matrix_version(group_index: int) -> None:
+    """Reset all inflation matrix cells when defaults/version change."""
     ver_key = _infl_matrix_ver_key(group_index)
+    if st.session_state.get(ver_key) == _INFL_MATRIX_VERSION:
+        return
+    config = db_st.get_inflation_matrix_config()
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            st.session_state.pop(_infl_matrix_key(group_index, row["key"], col), None)
+            st.session_state.pop(_infl_matrix_saved_key(group_index, row["key"], col), None)
+            st.session_state.pop(_infl_draft_key(group_index, row["key"], col), None)
+    st.session_state[ver_key] = _INFL_MATRIX_VERSION
+
+
+def _ensure_infl_matrix_cell_state(group_index: int, row_key: str, col: int) -> None:
+    _ensure_infl_matrix_version(group_index)
+    key = _infl_matrix_key(group_index, row_key, col)
+    draft_key = _infl_draft_key(group_index, row_key, col)
     default = _infl_matrix_default(row_key, col)
-    if st.session_state.get(ver_key) != _INFL_MATRIX_VERSION:
-        st.session_state.pop(key, None)
-        st.session_state[key] = _infl_display_str(default)
-        st.session_state[ver_key] = _INFL_MATRIX_VERSION
-    elif key not in st.session_state:
-        st.session_state[key] = _infl_display_str(default)
+    default_display = _infl_display_str(default)
+    if draft_key not in st.session_state:
+        st.session_state[draft_key] = default_display
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state[draft_key]
     elif isinstance(st.session_state[key], (int, float)):
         st.session_state[key] = _infl_display_str(st.session_state[key])
 
 
 def _infl_matrix_cell_value(group_index: int, row_key: str, col: int) -> float:
-    key = _infl_matrix_key(group_index, row_key, col)
-    default = _infl_matrix_default(row_key, col)
-    raw = st.session_state.get(key, _field_display_str(_INFL_PCT_FIELD, default))
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    parsed = _parse_infl_cell_text(str(raw))
-    return float(default if parsed is None else parsed)
+    return _infl_matrix_raw_value(group_index, row_key, col)
 
 
 def _infl_matrix_cell_display(group_index: int, row_key: str, col: int) -> str:
@@ -3101,8 +3640,14 @@ def _infl_matrix_vector(group_index: int, row_key: str) -> list[float]:
     return [_infl_matrix_cell_value(group_index, row_key, col) for col in range(len(config["columns"]))]
 
 
+def _inflation_input_total(group_index: int) -> float:
+    """Sum of user-entered Inflation row values across all columns."""
+    return round(sum(_infl_matrix_vector(group_index, "inflation")), 1)
+
+
 def _inflation_cell_values(inflation_vector: tuple[float, ...] | list[float], impact: list[int] | tuple[int, ...] | list[float]) -> list[float]:
-    return [round(float(inflation_vector[i]) * float(impact[i]) / 100, 1) for i in range(len(inflation_vector))]
+    """Effective % per column = impact[col] × inflation[col]."""
+    return [round(float(inflation_vector[i]) * float(impact[i]), 1) for i in range(len(inflation_vector))]
 
 
 def _compute_inflation_matrix(group_index: int) -> list[dict[str, Any]]:
@@ -3295,6 +3840,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
     if not st.session_state.pop(_RESET_KEY, False):
         return
     st.session_state[_SIM_RUN_KEY] = False
+    st.session_state.pop(_PENDING_SAVE_KEY, None)
     st.session_state.pop(_SIM_SNAPSHOT_KEY, None)
     st.session_state.pop(_SIM_HISTORY_KEY, None)
     st.session_state[_SIDE_GAP_GEN_KEY] = st.session_state.get(_SIDE_GAP_GEN_KEY, 0) + 1
@@ -3302,6 +3848,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
         st.session_state[_saved_key(i)] = False
         st.session_state.pop(f"sim_open_{i}", None)
         st.session_state.pop(_dm_calc_key(i), None)
+        st.session_state.pop(_dm_staged_key(i), None)
         st.session_state.pop(_infl_calc_key(i), None)
         st.session_state.pop(_infl_matrix_ver_key(i), None)
         st.session_state.pop(_pc_matrix_ver_key(i), None)
@@ -3310,6 +3857,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
             for col in range(len(infl_config["columns"])):
                 st.session_state.pop(_infl_matrix_key(i, row["key"], col), None)
                 st.session_state.pop(_infl_matrix_saved_key(i, row["key"], col), None)
+                st.session_state.pop(_infl_draft_key(i, row["key"], col), None)
         pc_config = db_st.get_process_cost_matrix_config()
         for row in pc_config["input_rows"]:
             for col in range(len(pc_config["columns"])):
@@ -3323,6 +3871,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
             st.session_state.pop(f"_{key}_wver", None)
     for spec in _PANEL_HEADER_FILTERS:
         st.session_state.pop(spec["key"], None)
+    st.session_state.pop(_PANEL_FILTERS_VER_KEY, None)
     for key in (_SCOPE_DRILL_KEY, _SCOPE_VALUE_KEY, _SCOPE_INIT_KEY, "sim_panel_year"):
         st.session_state.pop(key, None)
 
@@ -3601,6 +4150,20 @@ def _capture_group_submission(
             "fields": fields,
             "calculated_fields": calculated_fields,
         }
+    if _is_delivery_mix_group(group):
+        for fi, field in _delivery_mix_rows(group):
+            fields.append({
+                "name": field["name"],
+                "value": _delivery_mix_field_value(index, fi, field, group),
+                "suffix": field.get("suffix") or "",
+            })
+        return {
+            "title": group["title"],
+            "status_summary": _status_summary(groups),
+            "status_rows": build_status_rows(groups),
+            "fields": fields,
+            "calculated_fields": calculated_fields,
+        }
     for fi, field in enumerate(group.get("fields", [])):
         key = _field_key(index, fi)
         if dm_calc and fi < len(dm_calc):
@@ -3629,14 +4192,31 @@ def _capture_group_submission(
 
 def _on_save_group(index: int, group: dict[str, Any], groups: list[dict[str, Any]]) -> None:
     _persist_group_field_displays(index, group)
+    st.session_state[_saved_key(index)] = True
     if _is_delivery_mix_group(group):
         st.session_state[_dm_calc_key(index)] = _compute_delivery_mix(index, group)
+        st.session_state.pop(_dm_staged_key(index), None)
     elif _is_inflation_rates_group(group):
         st.session_state[_infl_calc_key(index)] = _compute_inflation_rates(index, group)
-    st.session_state[_saved_key(index)] = True
     st.session_state[_SIM_RUN_KEY] = False
     history = st.session_state.setdefault(_SIM_HISTORY_KEY, [])
     history.append(_capture_group_submission(index, group, groups))
+
+
+def process_pending_save(groups: list[dict[str, Any]]) -> None:
+    """Run Save after all parameter widgets have rendered for the rerun."""
+    pending_save = st.session_state.pop(_PENDING_SAVE_KEY, None)
+    if pending_save is None:
+        return
+    if pending_save < 0 or pending_save >= len(groups):
+        return
+    group = groups[pending_save]
+    if _is_inflation_rates_group(group):
+        _capture_infl_matrix_drafts(pending_save)
+    elif _is_delivery_mix_group(group):
+        _capture_dm_staged_values(pending_save, group)
+    _on_save_group(pending_save, group, groups)
+    st.rerun()
 
 
 def request_reset_simulate() -> None:
@@ -3658,6 +4238,15 @@ def _capture_submission_snapshot(groups: list[dict[str, Any]]) -> list[dict[str,
                         "value": _pc_matrix_cell_value(i, row["key"], col_idx),
                         "suffix": "",
                     })
+            continue
+        if _is_delivery_mix_group(group):
+            for fi, field in _delivery_mix_rows(group):
+                rows.append({
+                    "group": group["title"],
+                    "name": field["name"],
+                    "value": _delivery_mix_field_value(i, fi, field, group),
+                    "suffix": field.get("suffix") or "",
+                })
             continue
         for fi, field in enumerate(group.get("fields", [])):
             if _is_inflation_rates_group(group) and not _is_inflation_calculated_field(field):
@@ -3804,16 +4393,31 @@ def render_parameter_panel_header(data: dict[str, Any], groups: list[dict[str, A
             """
         )
         st.markdown('<span class="sim-panel-filters-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+        _ensure_panel_filter_state()
+        if not _panel_period_selected():
+            _reset_dependent_panel_filters()
+        _enforce_single_planning_filter()
+        period_enabled = _panel_period_selected()
         filter_cols = st.columns(5, gap="small", vertical_alignment="bottom")
         for col, spec in zip(filter_cols, _PANEL_HEADER_FILTERS):
+            key = spec["key"]
+            disabled = _is_panel_filter_disabled(spec, period_enabled=period_enabled)
+            if key == _PANEL_PERIOD_KEY:
+                on_change = _on_panel_period_changed
+            elif key in _PLANNING_FILTER_KEYS:
+                on_change = partial(_on_planning_filter_changed, key)
+            else:
+                on_change = None
             filter_select(
                 spec["label"],
                 spec["key"],
                 preset=spec["preset"],
-                default=spec["default"],
                 parent=col,
                 panel_header=True,
                 label_above=spec["label"],
+                placeholder=_PANEL_FILTER_PLACEHOLDER,
+                disabled=disabled,
+                on_change=on_change,
             )
 
 
@@ -3849,7 +4453,6 @@ def render_parameter_group_header(
                   <p style="margin:0;font-size:15px;font-weight:700;color:{_PRIMARY};line-height:1.25;">
                     {html.escape(group["title"])}
                   </p>
-                  {_tags_html(group.get("tags", []))}
                 </div>
                 <p style="margin:4px 0 0;font-size:12px;color:{_TEXT_MUTED};line-height:1.4;">
                   {html.escape(group["desc"])}
@@ -3871,7 +4474,9 @@ def render_parameter_group_header(
             if saved:
                 st.button("✓ Saved", key=f"sim_save_{index}", disabled=True, use_container_width=True)
             elif st.button("Save", key=f"sim_save_{index}", use_container_width=True):
-                _on_save_group(index, group, groups)
+                if _is_delivery_mix_group(group):
+                    _capture_dm_staged_values(index, group)
+                st.session_state[_PENDING_SAVE_KEY] = index
                 st.rerun()
         with btn_t:
             st.markdown('<span class="sim-toggle-col"></span>', unsafe_allow_html=True)
@@ -3898,8 +4503,9 @@ def _render_pct_chip_html(
 ) -> None:
     """Read-only value + % chip — inline styles so % shows inside st.html and st.markdown."""
     margin = "margin:0 auto;" if align == "center" else "margin-left:auto;margin-right:0;"
+    align_cls = " sim-pct-chip-right" if align == "right" else ""
     st.markdown(
-        f'<div class="sim-pct-chip-readonly" style="display:inline-flex;align-items:center;'
+        f'<div class="sim-pct-chip-readonly{align_cls}" style="display:inline-flex;align-items:center;'
         f'justify-content:flex-start;gap:4px;width:fit-content;max-width:100%;'
         f'min-width:{_PCT_CHIP_MIN_W};{margin}background:{_INPUT_BG};border:1px solid {_INPUT_BORDER};'
         f'border-radius:8px;padding:{_PCT_CHIP_PAD};gap:{_PCT_CHIP_GAP};min-height:{_PCT_CHIP_H};'
@@ -4016,6 +4622,33 @@ def _inject_infl_matrix_chip_css() -> None:
             margin-left: auto !important;
             margin-right: auto !important;
         }}
+        .sim-infl-calc-caption-wrap {{
+            display: block !important;
+            margin: 20px 0 4px 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+        }}
+        .sim-infl-calc-caption {{
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            color: {_INFL_CALC_CAPTION_COLOR} !important;
+            line-height: 1.4 !important;
+            visibility: visible !important;
+        }}
+        [data-testid="stElementContainer"]:has(.sim-infl-calc-caption-wrap),
+        [data-testid="stMarkdownContainer"]:has(.sim-infl-calc-caption-wrap) {{
+            display: block !important;
+            margin: 20px 0 4px 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            height: auto !important;
+            background: transparent !important;
+        }}
+        [class*="st-key-sim_infl_calc_table_"] {{
+            margin-top: 0 !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -4035,7 +4668,13 @@ def _render_infl_matrix_cell_input(
         _render_infl_pct_chip(display, readonly=True)
         return
     _ensure_infl_matrix_cell_state(group_index, row_key, col)
-    st.text_input("\u200b", key=key, label_visibility="collapsed")
+    st.text_input(
+        "\u200b",
+        key=key,
+        label_visibility="collapsed",
+        on_change=_sync_infl_draft_cell,
+        args=(group_index, row_key, col),
+    )
 
 
 def _infl_matrix_column_weights(num_columns: int, *, include_total: bool) -> list[float]:
@@ -4100,12 +4739,15 @@ def _render_infl_matrix_input_table(group_index: int, *, locked: bool) -> None:
         for col_idx, col_widget in enumerate(cols[1:]):
             with col_widget:
                 _render_infl_matrix_cell_input(group_index, row["key"], col_idx, locked=locked)
+    if not locked:
+        _capture_infl_matrix_drafts(group_index)
 
 
 def _render_infl_matrix_calc_table(group_index: int) -> None:
     config = db_st.get_inflation_matrix_config()
     columns = config["columns"]
-    calc_rows: list[dict[str, Any]] = st.session_state.get(_infl_calc_key(group_index), [])
+    calc_rows = _compute_inflation_matrix(group_index)
+    st.session_state[_infl_calc_key(group_index)] = calc_rows
     st.markdown('<span class="sim-infl-matrix-marker sim-infl-calc-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
     _render_infl_matrix_header_row(columns, variant="calc")
     for row_idx, calc_row in enumerate(calc_rows):
@@ -4245,7 +4887,7 @@ def _inject_pc_matrix_css() -> None:
             height: {_PC_CHIP_H} !important;
             padding: 0 8px !important;
             margin: 0 auto !important;
-            background: #ffffff !important;
+            background: {_INPUT_BG} !important;
             border: 1px solid {_INPUT_BORDER} !important;
             border-radius: 8px !important;
             box-sizing: border-box !important;
@@ -4254,6 +4896,78 @@ def _inject_pc_matrix_css() -> None:
             color: {_PRIMARY} !important;
             white-space: nowrap !important;
             overflow: visible !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"],
+        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"] > div,
+        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has([data-testid="stTextInput"]) {{
+            width: fit-content !important;
+            max-width: {_PC_CHIP_MAX_W} !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"] label,
+        [class*="st-key-sim_pc_input_"] [data-testid="stWidgetLabel"] {{
+            display: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] {{
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: fit-content !important;
+            min-width: {_PC_CHIP_MIN_W} !important;
+            max-width: {_PC_CHIP_MAX_W} !important;
+            min-height: {_PC_CHIP_H} !important;
+            height: {_PC_CHIP_H} !important;
+            padding: 0 8px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            background: {_INPUT_BG} !important;
+            background-color: {_INPUT_BG} !important;
+            border: 1px solid {_INPUT_BORDER} !important;
+            border-radius: 8px !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] > div {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] input {{
+            text-align: center !important;
+            font-weight: 400 !important;
+            font-size: 12px !important;
+            color: {_PRIMARY} !important;
+            border: none !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            width: 100% !important;
+            min-width: 48px !important;
+            max-width: 80px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"]:focus-within {{
+            border: 1px solid {_INPUT_BORDER} !important;
+            box-shadow: none !important;
+            background: {_INPUT_BG} !important;
+            background-color: {_INPUT_BG} !important;
         }}
         [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-row-last),
         [data-testid="stHorizontalBlock"]:has(.sim-pc-row-last) {{
@@ -4298,61 +5012,6 @@ def _inject_pc_matrix_css() -> None:
             margin: 0 !important;
             padding: 0 !important;
         }}
-        [class*="st-key-sim_pc_input_"] [data-testid="stElementContainer"]:has(.sim-pc-total-marker) {{
-            display: none !important;
-            height: 0 !important;
-            min-height: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-        }}
-        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"],
-        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"] > div {{
-            width: fit-content !important;
-            max-width: {_PC_CHIP_MAX_W} !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-            padding: 0 !important;
-            background: transparent !important;
-            border: none !important;
-        }}
-        [class*="st-key-sim_pc_input_"] [data-testid="stTextInput"] label,
-        [class*="st-key-sim_pc_input_"] [data-testid="stWidgetLabel"] {{
-            display: none !important;
-        }}
-        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] {{
-            position: relative !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: fit-content !important;
-            min-width: {_PC_CHIP_MIN_W} !important;
-            max-width: {_PC_CHIP_MAX_W} !important;
-            min-height: {_PC_CHIP_H} !important;
-            height: {_PC_CHIP_H} !important;
-            padding: 0 8px !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-            background: #ffffff !important;
-            border: 1px solid {_INPUT_BORDER} !important;
-            border-radius: 8px !important;
-            box-sizing: border-box !important;
-            overflow: visible !important;
-            box-shadow: none !important;
-        }}
-        [class*="st-key-sim_pc_input_"] div[data-baseweb="input"] input {{
-            text-align: center !important;
-            font-weight: 400 !important;
-            font-size: 12px !important;
-            color: {_PRIMARY} !important;
-            border: none !important;
-            background: transparent !important;
-            width: 100% !important;
-            min-width: 48px !important;
-            max-width: 80px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-        }}
         .sim-pc-company-label,
         .sim-pc-category-label {{
             display: flex !important;
@@ -4370,8 +5029,9 @@ def _inject_pc_matrix_css() -> None:
         }}
         .sim-pc-value-chip.sim-pc-total-chip {{
             background: {_PC_TOTAL_BG} !important;
+            background-color: {_PC_TOTAL_BG} !important;
             font-weight: 700 !important;
-            border: none !important;
+            border: 1px solid {_INPUT_BORDER} !important;
         }}
         .sim-pc-total-label {{
             font-weight: 700 !important;
@@ -4386,9 +5046,9 @@ def _inject_pc_matrix_css() -> None:
 
 def _render_pc_chip_html(display: str, *, total: bool = False) -> None:
     total_cls = " sim-pc-total-chip" if total else ""
-    bg = _PC_TOTAL_BG if total else "#ffffff"
+    bg = _PC_TOTAL_BG if total else _INPUT_BG
     weight = "700" if total else "400"
-    border = "none" if total else f"1px solid {_INPUT_BORDER}"
+    border = f"1px solid {_INPUT_BORDER}"
     st.markdown(
         f'<div class="sim-pc-value-chip{total_cls}" style="display:inline-flex;align-items:center;'
         f'justify-content:center;min-width:{_PC_CHIP_MIN_W};max-width:{_PC_CHIP_MAX_W};width:fit-content;'
@@ -4501,27 +5161,24 @@ def render_process_cost_matrix_fields(group: dict[str, Any], index: int) -> None
         _render_pc_matrix_input_table(index, locked=locked)
 
 
+def _refresh_infl_calc_state(group_index: int) -> None:
+    """Store calculated PTC/STC/SWC rows without rendering the matrix table."""
+    st.session_state[_infl_calc_key(group_index)] = _compute_inflation_matrix(group_index)
+
+
 def render_inflation_matrix_fields(group: dict[str, Any], index: int) -> None:
-    """Inflation matrix — editable inputs on top, calculated display below after Save."""
+    """Inflation matrix — editable inputs; calc runs on Save but table stays hidden."""
     locked = _group_is_saved(index)
+    _ensure_infl_matrix_version(index)
     _inject_infl_matrix_chip_css()
+    if locked:
+        _refresh_infl_calc_state(index)
     try:
         input_box = st.container(border=True, key=f"sim_infl_input_{index}")
     except TypeError:
         input_box = st.container(border=True)
     with input_box:
         _render_infl_matrix_input_table(index, locked=locked)
-    if locked:
-        st.markdown(
-            '<p class="sim-infl-calc-caption">Auto calculation Impact based on the given above value</p>',
-            unsafe_allow_html=True,
-        )
-        try:
-            calc_box = st.container(border=True, key=f"sim_infl_calc_table_{index}")
-        except TypeError:
-            calc_box = st.container(border=True)
-        with calc_box:
-            _render_infl_matrix_calc_table(index)
 
 
 def _render_process_section_header(field: dict[str, Any], *, show_divider: bool) -> None:
@@ -4536,7 +5193,8 @@ def _render_process_section_header(field: dict[str, Any], *, show_divider: bool)
 
 def render_parameter_group_fields(group: dict[str, Any], index: int) -> None:
     """Parameter rows — compact text chip with % suffix (no number_input steppers)."""
-    if not _group_is_open(index, group):
+    pending_save = st.session_state.get(_PENDING_SAVE_KEY)
+    if not _group_is_open(index, group) and pending_save != index:
         return
 
     st.markdown('<span class="sim-group-fields-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
@@ -4547,6 +5205,20 @@ def render_parameter_group_fields(group: dict[str, Any], index: int) -> None:
 
     if _is_process_cost_group(group):
         render_process_cost_matrix_fields(group, index)
+        return
+
+    if _is_delivery_mix_group(group):
+        dm_rows = _delivery_mix_rows(group)
+        for i, (fi, field) in enumerate(dm_rows):
+            _render_parameter_field(
+                field,
+                index,
+                fi,
+                is_last_row=i == len(dm_rows) - 1,
+                is_delivery_mix=True,
+            )
+        if dm_rows:
+            _capture_dm_staged_values(index, group)
         return
 
     fields = group.get("fields", [])
@@ -4591,6 +5263,8 @@ def render_parameter_group(
     groups: list[dict[str, Any]],
 ) -> None:
     """One Figma accordion card: header and fields inside the same bordered section."""
+    if _is_process_cost_group(group) and not _panel_company_selected():
+        return
     try:
         box = st.container(border=True, key=f"sim_grp_{index}")
     except TypeError:
@@ -4625,19 +5299,48 @@ def _render_parameter_field(
             f'<span class="sim-field-row-marker{last_cls}" aria-hidden="true"></span>',
             unsafe_allow_html=True,
         )
-        desc_html = (
-            f'<p style="margin:0;font-size:11px;color:{_TEXT_MUTED};line-height:1.4;">'
-            f'{html.escape(field["desc"])}</p>'
-            if field.get("desc")
-            else ""
-        )
-        _html(
-            f'<p style="margin:0 0 4px;font-size:13px;font-weight:700;color:{_PRIMARY};">'
-            f'{html.escape(field["name"])}{tags}</p>'
-            f"{desc_html}"
-        )
+        if is_delivery_mix:
+            st.markdown(
+                f'<div class="sim-dd-row-label"><span>{html.escape(field["name"])}</span>{tags}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            desc_html = (
+                f'<p style="margin:0;font-size:11px;color:{_TEXT_MUTED};line-height:1.4;">'
+                f'{html.escape(field["desc"])}</p>'
+                if field.get("desc")
+                else ""
+            )
+            _html(
+                f'<p style="margin:0 0 4px;font-size:13px;font-weight:700;color:{_PRIMARY};">'
+                f'{html.escape(field["name"])}{tags}</p>'
+                f"{desc_html}"
+            )
     with col_r:
-        if locked:
+        if is_delivery_mix:
+            st.markdown('<span class="sim-pct-input-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+            if locked:
+                display = _saved_field_display(group_index, field_index, field)
+                _render_pct_chip_html(
+                    display,
+                    align="right",
+                    value_size="14px",
+                    value_weight="700",
+                    suffix_size="13px",
+                    suffix_weight="600",
+                )
+            else:
+                pending_save = st.session_state.get(_PENDING_SAVE_KEY)
+                if pending_save != group_index:
+                    _ensure_field_text_state(key, field)
+                st.text_input(
+                    "\u200b",
+                    key=key,
+                    label_visibility="collapsed",
+                    on_change=_sync_dm_field_staged,
+                    args=(group_index, field_index, field),
+                )
+        elif locked:
             display = _saved_field_display(group_index, field_index, field)
             _render_pct_chip_html(
                 display,
@@ -4651,14 +5354,6 @@ def _render_parameter_field(
             st.markdown('<span class="sim-pct-input-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
             _ensure_field_text_state(key, field)
             st.text_input("\u200b", key=key, label_visibility="collapsed")
-
-    if is_delivery_mix and not is_last_row:
-        st.markdown(
-            '<div class="sim-dd-row-divider" aria-hidden="true" '
-            'style="display:block;width:100%;height:0;margin:0;padding:0;'
-            'border:none;border-top:1px solid #000000;box-sizing:border-box;"></div>',
-            unsafe_allow_html=True,
-        )
 
 
 def render_action_bar(
@@ -4794,24 +5489,43 @@ def _summary_rows_html(rows: list[dict[str, Any]]) -> str:
     )
 
 
-def render_live_impact_card(data: dict[str, Any]) -> None:
-    """Top sidebar card — Simulation Summary (Figma)."""
-    summary = data.get("summary") or {}
-    title = html.escape(summary.get("title", "Simulation Summary"))
-    badge = html.escape(summary.get("badge", "Real-time"))
-    rows = summary.get("rows") or []
+def _hierarchy_level_rows_html(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return (
+            f'<div style="padding:{_SUBMIT_SECTION_PAD};font-size:12px;color:{_TEXT_MUTED};">'
+            f"Select filters above to view hierarchy.</div>"
+        )
+    return "".join(
+        f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;
+            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;font-size:12px;">
+          <span style="font-size:12px;font-weight:700;color:#475569;">{html.escape(r["name"])}</span>
+          <span style="font-weight:700;color:{_PRIMARY};">{html.escape(r["value"])}</span>
+        </div>
+        """
+        for r in rows
+    )
+
+
+def render_hierarchy_level_card() -> None:
+    """Top sidebar card — selected panel filters as hierarchy rows."""
+    rows = _build_hierarchy_level_rows()
     _side_card(
         f"""
-        <div style="display:flex;align-items:center;justify-content:space-between;
-            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;background:#f8fafc;">
-          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">{title}</span>
-          <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;
-            font-size:10px;font-weight:700;background:#fef3c7;color:#b45309;">✦ {badge}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;background:{_INPUT_BG};">
+          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">Hierarchy Level</span>
         </div>
-        {_summary_rows_html(rows)}
+        {_hierarchy_level_rows_html(rows)}
         """,
         card_key="sim_side_impact",
     )
+
+
+def render_live_impact_card(data: dict[str, Any]) -> None:
+    """Top sidebar card — hierarchy level from panel filters."""
+    del data
+    render_hierarchy_level_card()
 
 
 def render_summary_card(data: dict[str, Any]) -> None:
@@ -4865,7 +5579,7 @@ def _submission_field_rows_html(fields: list[dict[str, Any]], *, compact: bool =
         f"""
         <div style="display:flex;justify-content:space-between;align-items:center;
             font-size:12px;{"margin-top:6px;" if compact else "padding:8px 0;border-bottom:1px solid #eef2f7;"}">
-          <span style="color:{_TEXT_MUTED};max-width:62%;">{html.escape(f["name"])}</span>
+          <span style="font-size:12px;font-weight:700;color:#475569;max-width:62%;">{html.escape(f["name"])}</span>
           <span style="font-weight:700;color:{_PRIMARY};">
             {html.escape(str(f["value"]))}{html.escape(f["suffix"])}
           </span>
@@ -4876,7 +5590,6 @@ def _submission_field_rows_html(fields: list[dict[str, Any]], *, compact: bool =
     if compact:
         return (
             f'<div style="padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;">'
-            f'<p style="margin:0;font-size:11px;font-weight:700;color:{_TEXT_MUTED};">Entered values</p>'
             f"{rows}</div>"
         )
     return (
@@ -4923,34 +5636,61 @@ def _inflation_calculated_rows_html(rows: list[dict[str, Any]]) -> str:
     return "".join(parts)
 
 
-def render_inflation_calculated_card(rows: list[dict[str, Any]], index: int) -> None:
+def render_inflation_calculated_card(
+    rows: list[dict[str, Any]],
+    card_index: int,
+    *,
+    inflation_group_index: int | None = None,
+) -> None:
     """Right sidebar — calculated PTC/STC/SWC rates after inflation Save."""
     if not rows:
         return
+    total_label = ""
+    if inflation_group_index is not None:
+        total = _infl_display_str(_inflation_input_total(inflation_group_index))
+        total_label = (
+            f'<span style="font-size:14px;font-weight:700;color:{_PRIMARY};">'
+            f"{html.escape(total)}%</span>"
+        )
     _side_card(
         f"""
-        <div style="padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;">
-          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">Calculated rates</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;background:{_INPUT_BG};">
+          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">Inflation rates</span>
+          {total_label}
         </div>
         {_inflation_calculated_rows_html(rows)}
         """,
-        card_key=f"sim_side_infl_calc_{index}",
+        card_key=f"sim_side_infl_calc_{card_index}",
         infl_calc=True,
     )
+
+
+def _skip_submission_card(entry: dict[str, Any]) -> bool:
+    """Inflation save only drives the calculated rates card below — no sidebar status card."""
+    return entry.get("title") == _INFLATION_RATES_TITLE
 
 
 def render_section_submission_card(entry: dict[str, Any], index: int) -> None:
     """One card per Save — shows submitted section data (Figma status card)."""
     title = html.escape(entry["title"])
-    summary = html.escape(entry.get("status_summary", ""))
+    is_direct_delivery_card = entry["title"] == _DELIVERY_MIX_TITLE
+    summary_html = ""
+    if not is_direct_delivery_card:
+        summary_html = (
+            f'<span style="font-size:12px;font-weight:700;color:#b45309;">'
+            f'{html.escape(entry.get("status_summary", ""))}</span>'
+        )
     field_block = _submission_field_rows_html(entry.get("fields") or [], compact=True)
-    status_block = _status_rows_html(entry.get("status_rows") or [], compact=True)
+    status_block = ""
+    if not is_direct_delivery_card:
+        status_block = _status_rows_html(entry.get("status_rows") or [], compact=True)
     _side_card(
         f"""
         <div style="display:flex;justify-content:space-between;align-items:baseline;
-            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;">
+            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;background:{_INPUT_BG};">
           <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">{title}</span>
-          <span style="font-size:12px;font-weight:700;color:#b45309;">{summary}</span>
+          {summary_html}
         </div>
         {field_block}
         {status_block}
@@ -4968,8 +5708,9 @@ def render_submission_history_cards(groups: list[dict[str, Any]]) -> None:
         None,
     )
     for index, entry in enumerate(history):
-        _side_card_spacer(f"before_submit_{index}")
-        render_section_submission_card(entry, index)
+        if not _skip_submission_card(entry):
+            _side_card_spacer(f"before_submit_{index}")
+            render_section_submission_card(entry, index)
         calc_rows = entry.get("calculated_fields") or []
         if (
             not calc_rows
@@ -4980,7 +5721,11 @@ def render_submission_history_cards(groups: list[dict[str, Any]]) -> None:
             calc_rows = _inflation_calculated_display_rows(inflation_idx, groups[inflation_idx])
         if calc_rows:
             _side_card_spacer(f"before_calc_{index}")
-            render_inflation_calculated_card(calc_rows, index)
+            render_inflation_calculated_card(
+                calc_rows,
+                index,
+                inflation_group_index=inflation_idx,
+            )
 
 
 def render_simulate_sidebar(data: dict[str, Any], groups: list[dict[str, Any]]) -> None:
