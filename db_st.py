@@ -276,6 +276,138 @@ def get_process_cost_matrix_config() -> dict:
     }
 
 
+# Step 1 — company-level cost baselines (Databricks / FADP demo data).
+_PROCESS_COST_COMPANY_BASELINES: dict[str, dict[str, float]] = {
+    "FR10": {
+        "PTC": 5_814_306.0,
+        "STC": 3_791_377.17,
+        "SWC Var": 982_450.0,
+        "SWC Fixed": 654_320.0,
+        "SWC Obs. fix.": 363_230.03,
+    },
+    "ES10": {
+        "PTC": 4_920_150.0,
+        "STC": 3_105_880.0,
+        "SWC Var": 845_200.0,
+        "SWC Fixed": 512_400.0,
+        "SWC Obs. fix.": 298_750.0,
+    },
+    "IT16": {
+        "PTC": 6_210_480.0,
+        "STC": 4_018_920.0,
+        "SWC Var": 1_105_600.0,
+        "SWC Fixed": 728_900.0,
+        "SWC Obs. fix.": 401_500.0,
+    },
+    "PT10": {
+        "PTC": 2_845_600.0,
+        "STC": 1_920_340.0,
+        "SWC Var": 512_800.0,
+        "SWC Fixed": 318_450.0,
+        "SWC Obs. fix.": 186_200.0,
+    },
+}
+
+# Step 3 — PLC-level forecast costs (demo; Databricks in production).
+_PROCESS_COST_PLC_FORECASTS: dict[str, tuple[dict, ...]] = {
+    "FR10": (
+        {
+            "plc": "Darty",
+            "product_subgroup": "000120002500002520 - Washing Machine, Front Loaded",
+            "ext_mat_group": "PLT - Electrolux Poland Sp",
+            "forecast_costs": {
+                "PTC": 19_204.9,
+                "STC": 12_850.0,
+                "SWC Var": 6_420.0,
+                "SWC Fixed": 3_180.0,
+                "SWC Obs. fix.": 920.0,
+            },
+        },
+        {
+            "plc": "Boulanger",
+            "product_subgroup": "000120002400002410 - Refrigerator, Bottom Freezer",
+            "ext_mat_group": "PLT - Electrolux Poland Sp",
+            "forecast_costs": {
+                "PTC": 15_680.0,
+                "STC": 9_240.0,
+                "SWC Var": 4_950.0,
+                "SWC Fixed": 2_760.0,
+                "SWC Obs. fix.": 640.0,
+            },
+        },
+    ),
+    "ES10": (
+        {
+            "plc": "El Corte Inglés",
+            "product_subgroup": "000120002500002520 - Washing Machine, Front Loaded",
+            "ext_mat_group": "ESP - Electrolux Spain",
+            "forecast_costs": {
+                "PTC": 17_920.0,
+                "STC": 11_200.0,
+                "SWC Var": 5_880.0,
+                "SWC Fixed": 2_940.0,
+                "SWC Obs. fix.": 810.0,
+            },
+        },
+    ),
+    "IT16": (
+        {
+            "plc": "MediaWorld",
+            "product_subgroup": "000120002500002520 - Washing Machine, Front Loaded",
+            "ext_mat_group": "ITA - Electrolux Italy",
+            "forecast_costs": {
+                "PTC": 18_450.0,
+                "STC": 10_680.0,
+                "SWC Var": 5_520.0,
+                "SWC Fixed": 2_850.0,
+                "SWC Obs. fix.": 720.0,
+            },
+        },
+    ),
+    "PT10": (
+        {
+            "plc": "Worten",
+            "product_subgroup": "000120002500002520 - Washing Machine, Front Loaded",
+            "ext_mat_group": "PRT - Electrolux Portugal",
+            "forecast_costs": {
+                "PTC": 14_280.0,
+                "STC": 8_960.0,
+                "SWC Var": 4_120.0,
+                "SWC Fixed": 2_180.0,
+                "SWC Obs. fix.": 540.0,
+            },
+        },
+    ),
+}
+
+
+def normalize_company_code(value: str) -> str:
+    """Map panel labels like 'France (FR10)' to 'FR10'."""
+    val = (value or "").strip()
+    if val in _PROCESS_COST_COMPANY_BASELINES:
+        return val
+    if "(" in val and val.endswith(")"):
+        return val.rsplit("(", 1)[-1].rstrip(")").strip()
+    return val
+
+
+def get_process_cost_company_baselines(company_code: str) -> dict[str, float]:
+    """Step 1 totals per cost category for the selected company."""
+    code = normalize_company_code(company_code)
+    baselines = _PROCESS_COST_COMPANY_BASELINES.get(code, {})
+    return {col: float(baselines.get(col, 0.0)) for col in _PROCESS_COST_COLUMNS}
+
+
+def get_process_cost_plc_forecasts(company_code: str) -> list[dict]:
+    """Step 3 PLC-level forecast costs for line impact calculation."""
+    code = normalize_company_code(company_code)
+    rows = _PROCESS_COST_PLC_FORECASTS.get(code)
+    if rows:
+        return [dict(row) for row in rows]
+    fallback = _PROCESS_COST_PLC_FORECASTS.get("FR10", ())
+    return [dict(row) for row in fallback]
+
+
 def _process_cost_fields() -> list[dict]:
     """Matrix UI replaces legacy section fields — keep empty for compatibility."""
     return []

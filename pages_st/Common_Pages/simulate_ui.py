@@ -53,7 +53,7 @@ _TAG = {
     "entered": ("#fef3c7", "#b45309"),
 }
 
-_INFL_CSS_VERSION = 51
+_INFL_CSS_VERSION = 52
 _INFL_CALC_CAPTION_COLOR = "#021632"
 _PCT_CHIP_MIN_W = "76px"
 _PCT_CHIP_MAX_W = "100px"
@@ -245,6 +245,12 @@ def _selected_panel_company() -> str:
     """Company code from the panel header Company dropdown."""
     val = _panel_filter_value(_PANEL_COMPANY_KEY)
     return val or _PANEL_FILTER_PLACEHOLDER
+
+
+def _resolved_panel_company_code() -> str:
+    """Company code for baselines — FR10, ES10, etc."""
+    val = _panel_filter_value(_PANEL_COMPANY_KEY)
+    return db_st.normalize_company_code(val) if val else ""
 
 
 def _panel_filter_value(key: str) -> str:
@@ -4090,6 +4096,10 @@ def _infl_calc_key(group_index: int) -> str:
     return f"sim_infl_calc_{group_index}"
 
 
+def _pc_calc_key(group_index: int) -> str:
+    return f"sim_pc_calc_{group_index}"
+
+
 def _is_inflation_rates_group(group: dict[str, Any]) -> bool:
     return group.get("title") == _INFLATION_RATES_TITLE
 
@@ -4401,6 +4411,75 @@ def _compute_pc_column_totals(group_index: int) -> list[int]:
     return totals
 
 
+def _format_share_pct(value: float) -> str:
+    """Display share % with up to 2 decimal places."""
+    rounded = round(float(value), 2)
+    if abs(rounded) < 1e-9:
+        return "0%"
+    text = f"{abs(rounded):.2f}".rstrip("0").rstrip(".")
+    sign = "+" if rounded > 0 else "-"
+    return f"{sign}{text}%"
+
+
+def _compute_process_cost_share_pct(project_total: float, company_baseline: float) -> float:
+    if not company_baseline:
+        return 0.0
+    return round(project_total / company_baseline * 100, 4)
+
+
+def _compute_process_cost_calculation(group_index: int) -> dict[str, Any]:
+    """Steps 1–3: company baselines → share % → PLC line impacts."""
+    config = db_st.get_process_cost_matrix_config()
+    company_code = _resolved_panel_company_code()
+    baselines = db_st.get_process_cost_company_baselines(company_code)
+    totals = _compute_pc_column_totals(group_index)
+    column_shares: list[dict[str, Any]] = []
+    share_by_column: dict[str, float] = {}
+    for col_idx, col_name in enumerate(config["columns"]):
+        project_total = float(totals[col_idx])
+        company_total = float(baselines.get(col_name, 0.0))
+        share_pct = _compute_process_cost_share_pct(project_total, company_total)
+        share_by_column[col_name] = share_pct
+        column_shares.append({
+            "column": col_name,
+            "project_total": project_total,
+            "company_baseline": company_total,
+            "share_pct": share_pct,
+        })
+    plc_impacts: list[dict[str, Any]] = []
+    for plc_row in db_st.get_process_cost_plc_forecasts(company_code):
+        forecasts = plc_row.get("forecast_costs") or {}
+        impacts: dict[str, float] = {}
+        for col_name in config["columns"]:
+            forecast_cost = float(forecasts.get(col_name, 0.0))
+            share_pct = share_by_column.get(col_name, 0.0)
+            impacts[col_name] = round(forecast_cost * share_pct / 100, 2)
+        plc_impacts.append({
+            "plc": plc_row.get("plc", ""),
+            "product_subgroup": plc_row.get("product_subgroup", ""),
+            "ext_mat_group": plc_row.get("ext_mat_group", ""),
+            "forecast_costs": forecasts,
+            "impacts": impacts,
+        })
+    return {
+        "company_code": company_code,
+        "column_shares": column_shares,
+        "plc_impacts": plc_impacts,
+        "company_baselines": baselines,
+    }
+
+
+def _process_cost_calc_state(group_index: int) -> dict[str, Any]:
+    """Always recompute so share % reflects current matrix totals."""
+    calc = _compute_process_cost_calculation(group_index)
+    st.session_state[_pc_calc_key(group_index)] = calc
+    return calc
+
+
+def _refresh_pc_calc_state(group_index: int) -> None:
+    st.session_state[_pc_calc_key(group_index)] = _compute_process_cost_calculation(group_index)
+
+
 def _pc_total_sidebar_label(col_name: str) -> str:
     return _PC_TOTAL_SIDEBAR_LABELS.get(col_name, f"{col_name} Total")
 
@@ -4419,16 +4498,88 @@ def _format_process_cost_total_eur(value: int | float) -> str:
     return f"-€{abs_amount}"
 
 
-def _process_cost_totals_display_rows(group_index: int) -> list[dict[str, Any]]:
+def _pc_column_from_sidebar_label(label: str) -> str:
+    for col, sidebar_label in _PC_TOTAL_SIDEBAR_LABELS.items():
+        if sidebar_label == label:
+            return col
+    return label
+
+
+def _process_cost_project_totals_by_column(
+    group_index: int,
+    entry: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    """Project cost totals per column — matrix first, saved snapshot fills gaps."""
     config = db_st.get_process_cost_matrix_config()
-    totals = _compute_pc_column_totals(group_index)
+    matrix_totals = _compute_pc_column_totals(group_index)
+    by_col: dict[str, float] = {
+        col_name: float(matrix_totals[col_idx])
+        for col_idx, col_name in enumerate(config["columns"])
+    }
+    if not entry:
+        return by_col
+    for field in entry.get("calculated_fields") or []:
+        if field.get("kind") == "share":
+            continue
+        raw = field.get("value")
+        if not isinstance(raw, (int, float)):
+            continue
+        name = str(field.get("name", ""))
+        if name.startswith("Total — "):
+            name = _pc_total_sidebar_label(name.removeprefix("Total — "))
+        col_name = _pc_column_from_sidebar_label(name)
+        saved_total = float(raw)
+        if by_col.get(col_name, 0.0) == 0.0 and saved_total != 0.0:
+            by_col[col_name] = saved_total
+    return by_col
+
+
+def _process_cost_share_by_column(
+    group_index: int,
+    entry: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    company_code = _resolved_panel_company_code()
+    baselines = db_st.get_process_cost_company_baselines(company_code)
+    project_totals = _process_cost_project_totals_by_column(group_index, entry)
+    return {
+        col_name: _compute_process_cost_share_pct(project_totals.get(col_name, 0.0), baselines.get(col_name, 0.0))
+        for col_name in db_st.get_process_cost_matrix_config()["columns"]
+    }
+
+
+def _process_cost_sidebar_display_rows(
+    group_index: int,
+    entry: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Sidebar rows — calculated share % only (no euro totals)."""
+    config = db_st.get_process_cost_matrix_config()
+    share_by_col = _process_cost_share_by_column(group_index, entry)
     rows: list[dict[str, Any]] = []
-    for col_idx, col_name in enumerate(config["columns"]):
-        total = totals[col_idx]
+    for col_name in config["columns"]:
+        share_pct = share_by_col.get(col_name, 0.0)
         rows.append({
             "name": _pc_total_sidebar_label(col_name),
-            "value": _format_process_cost_total_eur(total),
-            "value_class": "red" if total != 0 else "neutral",
+            "share_display": _format_share_pct(share_pct),
+            "share_class": "red" if share_pct != 0 else "neutral",
+        })
+    return rows
+
+
+def _process_cost_totals_display_rows(group_index: int) -> list[dict[str, Any]]:
+    return _process_cost_sidebar_display_rows(group_index)
+
+
+def _process_cost_share_display_rows(group_index: int) -> list[dict[str, Any]]:
+    calc = _process_cost_calc_state(group_index)
+    rows: list[dict[str, Any]] = []
+    for share_row in calc.get("column_shares") or []:
+        share_pct = float(share_row.get("share_pct", 0.0))
+        col_name = str(share_row.get("column", ""))
+        rows.append({
+            "name": f"{col_name} Share",
+            "value": _format_share_pct(share_pct),
+            "value_class": "red" if share_pct != 0 else "neutral",
+            "kind": "share",
         })
     return rows
 
@@ -4436,6 +4587,8 @@ def _process_cost_totals_display_rows(group_index: int) -> list[dict[str, Any]]:
 def _process_cost_totals_from_entry(entry: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for field in entry.get("calculated_fields") or []:
+        if field.get("kind") == "share":
+            continue
         raw = field.get("value", 0)
         if isinstance(raw, (int, float)):
             display = _format_process_cost_total_eur(raw)
@@ -4448,6 +4601,26 @@ def _process_cost_totals_from_entry(entry: dict[str, Any]) -> list[dict[str, Any
             "name": name,
             "value": display,
             "value_class": field.get("value_class", "red" if display != "€0" else "neutral"),
+            "kind": "total",
+        })
+    return rows
+
+
+def _process_cost_share_from_entry(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for field in entry.get("calculated_fields") or []:
+        if field.get("kind") != "share":
+            continue
+        raw = field.get("value", 0)
+        if isinstance(raw, (int, float)):
+            display = _format_share_pct(float(raw))
+        else:
+            display = str(raw)
+        rows.append({
+            "name": str(field.get("name", "")),
+            "value": display,
+            "value_class": field.get("value_class", "neutral"),
+            "kind": "share",
         })
     return rows
 
@@ -4536,6 +4709,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
         st.session_state.pop(_dm_staged_key(i), None)
         st.session_state.pop(_infl_calc_key(i), None)
         st.session_state.pop(_infl_matrix_ver_key(i), None)
+        st.session_state.pop(_pc_calc_key(i), None)
         st.session_state.pop(_pc_matrix_ver_key(i), None)
         st.session_state.pop(_pc_staged_key(i), None)
         infl_config = db_st.get_inflation_matrix_config()
@@ -4817,6 +4991,7 @@ def _capture_group_submission(
         }
     if _is_process_cost_group(group):
         config = db_st.get_process_cost_matrix_config()
+        calc = _process_cost_calc_state(index)
         totals = _compute_pc_column_totals(index)
         for col_idx, col_name in enumerate(config["columns"]):
             total = totals[col_idx]
@@ -4825,6 +5000,17 @@ def _capture_group_submission(
                 "value": total,
                 "suffix": "",
                 "value_class": "red" if total != 0 else "neutral",
+                "kind": "total",
+            })
+        for share_row in calc.get("column_shares") or []:
+            share_pct = float(share_row.get("share_pct", 0.0))
+            col_name = str(share_row.get("column", ""))
+            calculated_fields.append({
+                "name": f"{col_name} Share",
+                "value": share_pct,
+                "suffix": "%",
+                "value_class": "red" if share_pct != 0 else "neutral",
+                "kind": "share",
             })
         return {
             "title": group["title"],
@@ -4832,6 +5018,7 @@ def _capture_group_submission(
             "status_rows": build_status_rows(groups),
             "fields": [],
             "calculated_fields": calculated_fields,
+            "process_cost_calc": calc,
         }
     if _is_delivery_mix_group(group):
         for fi, field in _delivery_mix_rows(group):
@@ -4882,6 +5069,7 @@ def _on_save_group(index: int, group: dict[str, Any], groups: list[dict[str, Any
     elif _is_inflation_rates_group(group):
         st.session_state[_infl_calc_key(index)] = _compute_inflation_rates(index, group)
     elif _is_process_cost_group(group):
+        _refresh_pc_calc_state(index)
         st.session_state.pop(_pc_staged_key(index), None)
     st.session_state[_SIM_RUN_KEY] = False
     history = st.session_state.setdefault(_SIM_HISTORY_KEY, [])
@@ -4915,12 +5103,30 @@ def _capture_submission_snapshot(groups: list[dict[str, Any]]) -> list[dict[str,
     for i, group in enumerate(groups):
         if _is_process_cost_group(group):
             config = db_st.get_process_cost_matrix_config()
+            calc = _process_cost_calc_state(i)
             for row in config["input_rows"]:
                 for col_idx, col_name in enumerate(config["columns"]):
                     rows.append({
                         "group": group["title"],
                         "name": f'{row["label"]} — {col_name}',
                         "value": _pc_matrix_cell_value(i, row["key"], col_idx),
+                        "suffix": "",
+                    })
+            for share_row in calc.get("column_shares") or []:
+                col_name = str(share_row.get("column", ""))
+                rows.append({
+                    "group": group["title"],
+                    "name": f"{col_name} Share %",
+                    "value": _format_share_pct(float(share_row.get("share_pct", 0.0))),
+                    "suffix": "",
+                })
+            for plc_row in calc.get("plc_impacts") or []:
+                plc_name = str(plc_row.get("plc", ""))
+                for col_name, impact in (plc_row.get("impacts") or {}).items():
+                    rows.append({
+                        "group": group["title"],
+                        "name": f"{plc_name} — {col_name} impact",
+                        "value": round(float(impact), 2),
                         "suffix": "",
                     })
             continue
@@ -5819,23 +6025,121 @@ def _inject_pc_matrix_css() -> None:
             color: {_PRIMARY} !important;
             min-height: {_PC_TOTAL_ROW_H} !important;
         }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) {{
+            border-bottom: none !important;
+            border-top: 1px solid #000000 !important;
+            background: #ffffff !important;
+            margin: 0 !important;
+            padding: 10px !important;
+            gap: 8px !important;
+            align-items: center !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+            overflow: visible !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) > [data-testid="column"],
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) > [data-testid="column"] {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: visible !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+        }}
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) > [data-testid="column"]:first-child,
+        [class*="st-key-sim_pc_input_"] [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) > [data-testid="column"]:nth-child(2),
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) > [data-testid="column"]:first-child,
+        [data-testid="stHorizontalBlock"]:has(.sim-pc-share-marker) > [data-testid="column"]:nth-child(2) {{
+            justify-content: flex-start !important;
+        }}
+        .sim-pc-share-label {{
+            font-weight: 700 !important;
+            color: #166534 !important;
+            min-height: {_PC_TOTAL_ROW_H} !important;
+        }}
+        .sim-pc-value-chip.sim-pc-share-chip {{
+            background: #DCFCE7 !important;
+            background-color: #DCFCE7 !important;
+            font-weight: 700 !important;
+            color: #166534 !important;
+            border: 1px solid #86EFAC !important;
+        }}
+        .sim-pc-plc-wrap {{
+            margin: 12px 10px 0 10px !important;
+            border: 1px solid #E5E7EB !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            background: #ffffff !important;
+        }}
+        .sim-pc-plc-title {{
+            margin: 0 !important;
+            padding: 10px 12px !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            color: {_PRIMARY} !important;
+            background: {_INPUT_BG} !important;
+            border-bottom: 1px solid #E5E7EB !important;
+        }}
+        .sim-pc-plc-table {{
+            width: 100% !important;
+            border-collapse: collapse !important;
+            font-size: 11px !important;
+        }}
+        .sim-pc-plc-table th,
+        .sim-pc-plc-table td {{
+            padding: 8px 10px !important;
+            border-bottom: 1px solid #EEF2F7 !important;
+            text-align: left !important;
+            vertical-align: top !important;
+            color: #374151 !important;
+        }}
+        .sim-pc-plc-table th {{
+            font-weight: 700 !important;
+            color: {_PRIMARY} !important;
+            background: #F8FAFC !important;
+        }}
+        .sim-pc-plc-table td.num,
+        .sim-pc-plc-table th.num {{
+            text-align: right !important;
+            white-space: nowrap !important;
+        }}
+        .sim-pc-plc-table tr:last-child td {{
+            border-bottom: none !important;
+        }}
+        .sim-pc-plc-impact {{
+            font-weight: 700 !important;
+            color: {_DANGER} !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _render_pc_chip_html(display: str, *, total: bool = False) -> None:
-    total_cls = " sim-pc-total-chip" if total else ""
-    bg = _PC_TOTAL_BG if total else _INPUT_BG
-    weight = "700" if total else "400"
-    border = f"1px solid {_INPUT_BORDER}"
+def _render_pc_chip_html(display: str, *, total: bool = False, share: bool = False) -> None:
+    if share:
+        total_cls = " sim-pc-share-chip"
+        bg = "#DCFCE7"
+        weight = "700"
+        color = "#166534"
+    elif total:
+        total_cls = " sim-pc-total-chip"
+        bg = _PC_TOTAL_BG
+        weight = "700"
+        color = _PRIMARY
+    else:
+        total_cls = ""
+        bg = _INPUT_BG
+        weight = "400"
+        color = _PRIMARY
+    border = "1px solid #86EFAC" if share else f"1px solid {_INPUT_BORDER}"
     st.markdown(
         f'<div class="sim-pc-value-chip{total_cls}" style="display:inline-flex;align-items:center;'
         f'justify-content:center;min-width:{_PC_CHIP_MIN_W};max-width:{_PC_CHIP_MAX_W};width:fit-content;'
         f'min-height:{_PC_CHIP_H};height:{_PC_CHIP_H};padding:0 8px;margin:0 auto;'
         f'background:{bg};border:{border};border-radius:8px;box-sizing:border-box;'
-        f'font-size:12px;font-weight:{weight};color:{_PRIMARY};white-space:nowrap;">'
+        f'font-size:12px;font-weight:{weight};color:{color};white-space:nowrap;">'
         f"{html.escape(display)}</div>",
         unsafe_allow_html=True,
     )
@@ -5939,12 +6243,86 @@ def _render_pc_matrix_input_table(group_index: int, *, locked: bool) -> None:
         with col_widget:
             _render_pc_chip_html(_pc_display_str(totals[col_idx]), total=True)
 
+    if not locked:
+        calc = _process_cost_calc_state(group_index)
+        share_values = [
+            float(row.get("share_pct", 0.0))
+            for row in calc.get("column_shares") or []
+        ]
+        if len(share_values) < len(columns):
+            share_values.extend([0.0] * (len(columns) - len(share_values)))
+        cols = st.columns(_pc_matrix_column_weights(len(columns)), gap="small", vertical_alignment="center")
+        with cols[0]:
+            st.markdown('<span class="sim-pc-share-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sim-pc-company-label" aria-hidden="true"><span>&nbsp;</span></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f'<div class="sim-pc-category-label sim-pc-share-label" '
+                f'style="min-height:{_PC_TOTAL_ROW_H};display:flex;align-items:center;">'
+                f"<span>Share %</span></div>",
+                unsafe_allow_html=True,
+            )
+        for col_idx, col_widget in enumerate(cols[2:]):
+            with col_widget:
+                _render_pc_chip_html(_format_share_pct(share_values[col_idx]), share=True)
+
+
+def _render_pc_plc_impact_table(calc: dict[str, Any]) -> None:
+    """Step 3 — line-level project impact at PLC."""
+    plc_rows = calc.get("plc_impacts") or []
+    if not plc_rows:
+        return
+    config = db_st.get_process_cost_matrix_config()
+    columns = config["columns"]
+    header_cells = "".join(
+        f'<th class="num">{html.escape(col)} impact</th>' for col in columns
+    )
+    body_rows: list[str] = []
+    for plc_row in plc_rows:
+        impacts = plc_row.get("impacts") or {}
+        impact_cells = "".join(
+            f'<td class="num sim-pc-plc-impact">{html.escape(_pc_display_str(impacts.get(col, 0)))}</td>'
+            for col in columns
+        )
+        body_rows.append(
+            f"<tr>"
+            f'<td>{html.escape(str(plc_row.get("plc", "")))}</td>'
+            f'<td>{html.escape(str(plc_row.get("product_subgroup", "")))}</td>'
+            f"{impact_cells}"
+            f"</tr>"
+        )
+    st.markdown(
+        f"""
+        <div class="sim-pc-plc-wrap">
+          <p class="sim-pc-plc-title">Line-level project impact (Step 3)</p>
+          <table class="sim-pc-plc-table">
+            <thead>
+              <tr>
+                <th>PLC</th>
+                <th>Product subgroup</th>
+                {header_cells}
+              </tr>
+            </thead>
+            <tbody>
+              {"".join(body_rows)}
+            </tbody>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 def render_process_cost_matrix_fields(group: dict[str, Any], index: int) -> None:
     """Process cost matrix — company × category rows with PTC/STC/SWC value columns."""
     locked = _group_is_saved(index)
     _ensure_pc_matrix_version(index)
     _inject_pc_matrix_css()
+    if locked:
+        _refresh_pc_calc_state(index)
     try:
         input_box = st.container(border=True, key=f"sim_pc_input_{index}")
     except TypeError:
@@ -6468,22 +6846,26 @@ def _process_cost_totals_rows_html(rows: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for i, row in enumerate(rows):
         border = "border-bottom:1px solid #eef2f7;" if i < len(rows) - 1 else ""
-        value_class = row.get("value_class", "red")
-        value_color = _VAL.get(value_class, _DANGER)
+        share_display = str(row.get("share_display", "0%"))
+        share_class = row.get("share_class", "neutral")
+        share_color = _VAL.get(share_class, _TEXT)
         parts.append(
             f"""
             <div style="display:flex;justify-content:space-between;align-items:center;
                 padding:{_SUBMIT_SECTION_PAD};{border}font-size:12px;">
               <span style="font-weight:600;color:{_TEXT_MUTED};">{html.escape(row["name"])}</span>
-              <span style="font-weight:700;color:{value_color};">{html.escape(str(row["value"]))}</span>
+              <span style="font-weight:700;color:{share_color};">{html.escape(share_display)}</span>
             </div>
             """
         )
     return "".join(parts)
 
 
-def render_process_cost_totals_card(rows: list[dict[str, Any]], card_index: int) -> None:
-    """Right sidebar — PTC/STC/SWC column totals after process cost Save (Figma)."""
+def render_process_cost_totals_card(
+    rows: list[dict[str, Any]],
+    card_index: int,
+) -> None:
+    """Right sidebar — calculated share % per category after process cost Save."""
     if not rows:
         return
     _side_card(
@@ -6583,12 +6965,10 @@ def render_submission_history_cards(groups: list[dict[str, Any]]) -> None:
             if title in by_title:
                 entry = by_title[title]
                 break
-        totals_rows = _process_cost_totals_from_entry(entry) if entry else []
-        if not totals_rows:
-            totals_rows = _process_cost_totals_display_rows(pc_idx)
-        if totals_rows:
+        sidebar_rows = _process_cost_sidebar_display_rows(pc_idx, entry)
+        if sidebar_rows:
             _side_card_spacer("before_pc_totals")
-            render_process_cost_totals_card(totals_rows, slot)
+            render_process_cost_totals_card(sidebar_rows, slot)
 
 
 def render_simulate_sidebar(data: dict[str, Any], groups: list[dict[str, Any]]) -> None:
