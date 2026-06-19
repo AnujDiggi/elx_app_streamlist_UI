@@ -17,6 +17,8 @@ _SIM_CTX_CSS_INJECTED = False
 _SELECTBOX_SUPPORTS_FILTER_MODE = "filter_mode" in inspect.signature(st.selectbox).parameters
 _FILTER_H = 32
 _FILTER_CTX_H = 36
+_PANEL_HEADER_FILTER_GAP = "2px"
+PANEL_HEADER_DD_WIDTH = "75%"
 PRESET_OPTIONS: dict[str, list[str]] = {
     "Area": ["FR10", "FR20", "EA1", "DE01"],
     "Period": ["Jan", "EA2 · 2026", "EA1 · 2025", "EA2 · 2027"],
@@ -38,8 +40,8 @@ PRESET_OPTIONS: dict[str, list[str]] = {
     ],
     "Business Area": ["Europe", "Americas", "APAC", "MEA"],
     "Commercial Area": ["ATED", "EMEA", "NAFTA", "LATAM"],
-    "Panel Country": ["Germany", "France", "Spain", "Italy", "Portugal"],
-    "Panel Period": ["Last 6 months", "Last 3 months", "Last 12 months", "YTD", "Last month"],
+    "Panel Country": ["France", "Germany", "Spain", "Italy", "Portugal"],
+    "Panel Period": ["BC 202601", "BC 202512", "BC 202511", "BC 202510"],
     "Panel Company": ["FR10", "ES10", "IT16", "PT10"],
 }
 
@@ -187,6 +189,54 @@ def inject_filter_select_css() -> None:
         [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] svg {{
             fill: #ffffff !important;
             color: #ffffff !important;
+        }}
+
+        .sim-panel-filters-row-marker {{
+            display: none !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] {{
+            gap: {_PANEL_HEADER_FILTER_GAP} !important;
+            justify-content: flex-start !important;
+            width: auto !important;
+            max-width: 100% !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+            flex: 0 0 auto !important;
+            flex-grow: 0 !important;
+            flex-shrink: 0 !important;
+            width: auto !important;
+            max-width: fit-content !important;
+            min-width: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stHorizontalBlock"]:has(.elx-filter-panel) {{
+            gap: {_PANEL_HEADER_FILTER_GAP} !important;
+            justify-content: flex-start !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stHorizontalBlock"]:has(.elx-filter-panel) > [data-testid="column"] {{
+            flex: 0 0 auto !important;
+            flex-grow: 0 !important;
+            flex-shrink: 0 !important;
+            width: auto !important;
+            max-width: fit-content !important;
+            min-width: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) > div[data-testid="stVerticalBlock"] {{
+            align-items: flex-start !important;
+            width: auto !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) > div[data-testid="stVerticalBlock"] {{
+            align-items: flex-start !important;
+            width: 100% !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) [data-testid="stSelectbox"],
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"],
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"] > div {{
+            width: 100% !important;
+            max-width: 100% !important;
         }}
 
         [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] > div {{

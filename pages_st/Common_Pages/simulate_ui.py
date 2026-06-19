@@ -53,7 +53,7 @@ _TAG = {
     "entered": ("#fef3c7", "#b45309"),
 }
 
-_INFL_CSS_VERSION = 40
+_INFL_CSS_VERSION = 51
 _INFL_CALC_CAPTION_COLOR = "#021632"
 _PCT_CHIP_MIN_W = "76px"
 _PCT_CHIP_MAX_W = "100px"
@@ -87,6 +87,12 @@ _PANEL_CHIP_CHEVRON = "#6B7280"
 _PANEL_CHIP_RADIUS = "8px"
 _PANEL_CHIP_H = "32px"
 _PANEL_CHIP_FONT = "11px"
+_PANEL_HEADER_FILTER_PAD = "0 16px 16px 16px"
+_PANEL_PLAN_BTN_TEXT = "#70737B"
+_PANEL_PLAN_BTN_TEXT_ENABLED = "#ffffff"
+_PANEL_PLAN_BTN_TEXT_ACTIVE = "#ffffff"
+_PANEL_PLAN_BTN_BG_DISABLED = "#CBCBCB1A"
+_PANEL_PLAN_BTN_BG_ENABLED = "#FFFFFF1A"
 _SCOPE_ROOT_PLACEHOLDER = "— Select category —"
 _SCOPE_DRILL_KEY = "sim_panel_scope_drill"
 _SCOPE_VALUE_KEY = "sim_panel_scope_value"
@@ -95,8 +101,9 @@ _SCOPE_PICK_QP = "scope_pick"
 
 _PANEL_FILTER_PLACEHOLDER = "— Select —"
 _PANEL_PERIOD_KEY = "sim_panel_period"
+_PANEL_PLANNING_LEVEL_KEY = "sim_panel_planning_level"
 _PANEL_FILTERS_VER_KEY = "sim_panel_filters_ver"
-_PANEL_FILTERS_VERSION = 2
+_PANEL_FILTERS_VERSION = 3
 _PANEL_HEADER_FILTERS: tuple[dict[str, Any], ...] = (
     {"label": "Period", "key": "sim_panel_period", "preset": "Panel Period", "requires_period": False},
     {"label": "Business Area", "key": "sim_panel_business_area", "preset": "Business Area", "requires_period": True},
@@ -106,6 +113,9 @@ _PANEL_HEADER_FILTERS: tuple[dict[str, Any], ...] = (
 )
 _PLANNING_FILTER_KEYS: tuple[str, ...] = tuple(
     spec["key"] for spec in _PANEL_HEADER_FILTERS if spec.get("requires_period")
+)
+_PANEL_PLANNING_SPECS: tuple[dict[str, Any], ...] = tuple(
+    spec for spec in _PANEL_HEADER_FILTERS if spec.get("requires_period")
 )
 _PANEL_COMPANY_KEY = "sim_panel_company"
 _DELIVERY_MIX_DIMENSIONS: tuple[tuple[str, str], ...] = (
@@ -124,8 +134,11 @@ _DM_PCT_FIELD: dict[str, Any] = {
 
 
 def _panel_period_selected() -> bool:
-    val = str(st.session_state.get(_PANEL_PERIOD_KEY, _PANEL_FILTER_PLACEHOLDER))
-    return val != _PANEL_FILTER_PLACEHOLDER
+    val = str(st.session_state.get(_PANEL_PERIOD_KEY, _PANEL_FILTER_PLACEHOLDER)).strip()
+    if not val:
+        return False
+    placeholders = {_PANEL_FILTER_PLACEHOLDER, "-- Select --", "- Select -"}
+    return val not in placeholders
 
 
 def _panel_company_selected() -> bool:
@@ -133,6 +146,7 @@ def _panel_company_selected() -> bool:
 
 
 def _reset_dependent_panel_filters() -> None:
+    st.session_state[_PANEL_PLANNING_LEVEL_KEY] = ""
     for spec in _PANEL_HEADER_FILTERS:
         if spec.get("requires_period"):
             st.session_state[spec["key"]] = _PANEL_FILTER_PLACEHOLDER
@@ -143,17 +157,50 @@ def _on_panel_period_changed() -> None:
         _reset_dependent_panel_filters()
 
 
-def _active_planning_filter_key() -> str | None:
-    """Which planning dropdown (BA / Commercial / Country / Company) has a value."""
-    active: str | None = None
+def _planning_level_spec(key: str) -> dict[str, Any] | None:
+    for spec in _PANEL_PLANNING_SPECS:
+        if spec["key"] == key:
+            return spec
+    return None
+
+
+def _active_planning_level_key() -> str | None:
+    """Which planning-level button is active (Business Area / Country / etc.)."""
+    lvl = str(st.session_state.get(_PANEL_PLANNING_LEVEL_KEY, "") or "")
+    return lvl if lvl else None
+
+
+def _sync_planning_level_from_values() -> None:
+    """Keep button state aligned when a planning value already exists."""
+    if _active_planning_level_key():
+        return
     for key in _PLANNING_FILTER_KEYS:
         if _panel_filter_value(key):
-            active = key
-    return active
+            st.session_state[_PANEL_PLANNING_LEVEL_KEY] = key
+            return
+
+
+def _on_planning_level_pick(level_key: str) -> None:
+    """Activate one planning dimension; lock the other three buttons."""
+    st.session_state[_PANEL_PLANNING_LEVEL_KEY] = level_key
+    for key in _PLANNING_FILTER_KEYS:
+        if key != level_key:
+            st.session_state[key] = _PANEL_FILTER_PLACEHOLDER
+
+
+def _active_planning_filter_key() -> str | None:
+    """Active planning dimension — from button selection or selected value."""
+    level = _active_planning_level_key()
+    if level:
+        return level
+    for key in _PLANNING_FILTER_KEYS:
+        if _panel_filter_value(key):
+            return key
+    return None
 
 
 def _enforce_single_planning_filter() -> None:
-    """Only one planning dimension may be selected at a time."""
+    """Only one planning dimension may have a value at a time."""
     active: str | None = None
     for key in _PLANNING_FILTER_KEYS:
         if not _panel_filter_value(key):
@@ -165,24 +212,24 @@ def _enforce_single_planning_filter() -> None:
 
 
 def _on_planning_filter_changed(changed_key: str) -> None:
-    """When one planning filter is set, clear the other three."""
-    if not _panel_filter_value(changed_key):
-        return
+    """When a planning value is set, lock dimension and clear the other three."""
+    if _panel_filter_value(changed_key):
+        st.session_state[_PANEL_PLANNING_LEVEL_KEY] = changed_key
     for key in _PLANNING_FILTER_KEYS:
         if key != changed_key:
             st.session_state[key] = _PANEL_FILTER_PLACEHOLDER
 
 
-def _is_panel_filter_disabled(spec: dict[str, Any], *, period_enabled: bool) -> bool:
-    key = spec["key"]
-    if key == _PANEL_PERIOD_KEY:
-        return False
-    if not period_enabled:
-        return True
-    active = _active_planning_filter_key()
-    if active and key in _PLANNING_FILTER_KEYS and key != active:
-        return True
-    return False
+def _affected_forecast_record_count() -> int | None:
+    """Demo count shown after period + planning level + value are all set."""
+    if not _panel_period_selected():
+        return None
+    level_key = _active_planning_level_key()
+    if not level_key:
+        return None
+    if not _panel_filter_value(level_key):
+        return None
+    return 7
 
 
 def _ensure_panel_filter_state() -> None:
@@ -190,6 +237,7 @@ def _ensure_panel_filter_state() -> None:
         return
     for spec in _PANEL_HEADER_FILTERS:
         st.session_state[spec["key"]] = _PANEL_FILTER_PLACEHOLDER
+    st.session_state[_PANEL_PLANNING_LEVEL_KEY] = ""
     st.session_state[_PANEL_FILTERS_VER_KEY] = _PANEL_FILTERS_VERSION
 
 
@@ -370,26 +418,118 @@ def inject_simulate_layout_css() -> None:
         }
         .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-panel-header-wrap) + [data-testid="stElementContainer"] {
             padding: 0 16px 16px 16px !important;
+            box-sizing: border-box !important;
         }
 
-        /* Panel header dropdowns — five equal columns */
+        /* Panel header filters wrap — reliable 16px inset */
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_filters_wrap"],
+        .block-container:has(#simulate-page) [data-testid="stElementContainer"][class*="st-key-sim_panel_filters_wrap"],
+        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"][class*="st-key-sim_panel_filters_wrap"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_filters_wrap"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [data-testid="stElementContainer"][class*="st-key-sim_panel_filters_wrap"] {
+            padding: 0 16px 16px 16px !important;
+            box-sizing: border-box !important;
+            background: #042A57 !important;
+            background-color: #042A57 !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_filters_wrap"] [data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_filters_wrap"] [data-testid="stVerticalBlock"] {
+            padding: 0 !important;
+            margin: 0 !important;
+            background: #042A57 !important;
+            background-color: #042A57 !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_filters_wrap"] [data-testid="stHorizontalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_filters_wrap"] [data-testid="stHorizontalBlock"] {
+            justify-content: space-between !important;
+            align-items: flex-end !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            gap: 12px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Panel header dropdowns — aligned filter row */
+        .sim-panel-filters-row-marker,
+        .sim-panel-period-col-marker,
+        .sim-panel-select-col-marker,
+        .sim-panel-dd-75-marker,
+        .sim-planning-level-marker,
+        .sim-affected-records-marker { display: none !important; }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-end !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            gap: 12px !important;
+            padding: 0 16px 16px 16px !important;
+            box-sizing: border-box !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-panel-period-col-marker),
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-panel-select-col-marker) {
+            flex: 0 0 auto !important;
+            width: auto !important;
+            max-width: none !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            align-self: flex-end !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-planning-level-marker) {
+            flex: 1 1 auto !important;
+            min-width: 260px !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            align-self: flex-end !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-affected-records-marker) {
+            flex: 0 0 auto !important;
+            margin-left: auto !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            align-self: flex-end !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-period-col-marker) > [data-testid="stHorizontalBlock"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-select-col-marker) > [data-testid="stHorizontalBlock"] {
+            gap: 0 !important;
+            width: 100% !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-planning-level-marker) > [data-testid="stHorizontalBlock"]:has([class*="st-key-sim_plan_btn_"]) {
+            justify-content: center !important;
+            gap: 4px !important;
+        }
         .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="stHorizontalBlock"] {
             justify-content: flex-start !important;
-            gap: 12px !important;
+            gap: 2px !important;
             width: 100% !important;
             max-width: 100% !important;
             overflow: visible !important;
-            padding: 16px !important;
         }
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] {
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) {
             min-width: 0 !important;
             overflow: visible !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
         }
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] [data-testid="stSelectbox"],
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"],
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"] div[data-baseweb="select"] > div {
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) > div[data-testid="stVerticalBlock"] {
+            align-items: flex-start !important;
             width: 100% !important;
-            min-width: 0 !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) [data-testid="stSelectbox"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"] > div {
+            width: 100% !important;
             max-width: 100% !important;
         }
         .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] .elx-filter-upper-lbl,
@@ -403,6 +543,111 @@ def inject_simulate_layout_css() -> None:
             font-weight: 600 !important;
             opacity: 1 !important;
             visibility: visible !important;
+        }
+
+        /* Planning level buttons — navy panel header */
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-planning-level-marker) {
+            flex: 1 1 auto !important;
+            min-width: 260px !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] .elx-planning-level-heading {
+            margin: 0 0 6px 2px !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] {
+            min-width: 0 !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button {
+            height: 32px !important;
+            min-height: 32px !important;
+            padding: 0 8px !important;
+            font-size: 10px !important;
+            font-weight: 600 !important;
+            line-height: 1.1 !important;
+            border-radius: 4px !important;
+            border: none !important;
+            white-space: nowrap !important;
+            box-shadow: none !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button p,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button span,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button div,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button [data-testid="stMarkdownContainer"] {
+            background: transparent !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) {
+            background: #FFFFFF1A !important;
+            background-color: #FFFFFF1A !important;
+            background-image: none !important;
+            border: none !important;
+            color: #ffffff !important;
+            cursor: pointer !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) p,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) span,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) div,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) [data-testid="stMarkdownContainer"] {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] {
+            background: rgba(255, 255, 255, 0.22) !important;
+            border: none !important;
+            color: #ffffff !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] p,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] span,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] div,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] [data-testid="stMarkdownContainer"] {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:disabled {
+            background: #CBCBCB1A !important;
+            background-color: #CBCBCB1A !important;
+            background-image: none !important;
+            border: none !important;
+            color: #70737B !important;
+            opacity: 1 !important;
+            cursor: not-allowed !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled p,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled span,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled div,
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled [data-testid="stMarkdownContainer"] {
+            color: #70737B !important;
+            -webkit-text-fill-color: #70737B !important;
+        }
+
+        /* Affected forecast records — right side stat */
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] .sim-affected-records {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-end !important;
+            gap: 8px !important;
+            flex-wrap: nowrap !important;
+            white-space: nowrap !important;
+            padding-top: 0 !important;
+            min-height: 32px !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] .elx-affected-records-lbl {
+            margin: 0 !important;
+            text-align: right !important;
+            display: inline !important;
+            white-space: nowrap !important;
+        }
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] .sim-affected-records-val {
+            color: #ffffff !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            line-height: 1.2 !important;
+            min-height: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: flex-end !important;
+            white-space: nowrap !important;
         }
 
         /* Panel scope tree dropdown (hover flyout, no iframe) */
@@ -836,8 +1081,40 @@ def inject_css() -> None:
             background-color: {_PANEL_HEADER_BG} !important;
             margin: 0 !important;
         }}
+        [class*="st-key-sim_panel_filters_wrap"],
+        [data-testid="stElementContainer"][class*="st-key-sim_panel_filters_wrap"],
+        [data-testid="stVerticalBlockBorderWrapper"][class*="st-key-sim_panel_filters_wrap"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_filters_wrap"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [data-testid="stElementContainer"][class*="st-key-sim_panel_filters_wrap"] {{
+            padding: {_PANEL_HEADER_FILTER_PAD} !important;
+            box-sizing: border-box !important;
+            background: {_PANEL_HEADER_BG} !important;
+            background-color: {_PANEL_HEADER_BG} !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [class*="st-key-sim_panel_filters_wrap"] [data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_filters_wrap"] [data-testid="stVerticalBlock"] {{
+            padding: 0 !important;
+            margin: 0 !important;
+            background: {_PANEL_HEADER_BG} !important;
+            background-color: {_PANEL_HEADER_BG} !important;
+        }}
+        [class*="st-key-sim_panel_filters_wrap"] [data-testid="stHorizontalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_filters_wrap"] [data-testid="stHorizontalBlock"] {{
+            justify-content: space-between !important;
+            align-items: flex-end !important;
+            width: calc(100% - 32px) !important;
+            max-width: calc(100% - 32px) !important;
+            gap: 12px !important;
+            padding: 0 !important;
+            margin: 0 16px 16px 16px !important;
+            box-sizing: border-box !important;
+        }}
         [data-testid="stElementContainer"]:has(.sim-panel-header-wrap) + [data-testid="stElementContainer"] {{
-            padding: 0 16px 16px 16px !important;
+            padding: {_PANEL_HEADER_FILTER_PAD} !important;
+            box-sizing: border-box !important;
         }}
         [data-testid="stElementContainer"]:has(.sim-panel-header-wrap),
         [data-testid="stElementContainer"]:has(.sim-panel-header-wrap) .stHtml {{
@@ -847,16 +1124,79 @@ def inject_css() -> None:
             padding: 0 !important;
         }}
         [data-testid="stElementContainer"]:has(.sim-panel-header-wrap) + [data-testid="stElementContainer"] [data-testid="stHorizontalBlock"] {{
-            justify-content: flex-start !important;
+            justify-content: space-between !important;
+            align-items: flex-end !important;
             gap: 12px !important;
+            width: calc(100% - 32px) !important;
+            max-width: calc(100% - 32px) !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 16px 16px 16px !important;
+            box-sizing: border-box !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] {{
+            justify-content: space-between !important;
+            align-items: flex-end !important;
+            width: calc(100% - 32px) !important;
+            max-width: calc(100% - 32px) !important;
+            gap: 12px !important;
+            padding: 0 !important;
+            margin: 0 16px 16px 16px !important;
+            box-sizing: border-box !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-panel-period-col-marker),
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-panel-select-col-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-panel-period-col-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-panel-select-col-marker) {{
+            flex: 0 0 auto !important;
+            width: auto !important;
+            max-width: none !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            align-self: flex-end !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-planning-level-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-planning-level-marker) {{
+            flex: 1 1 auto !important;
+            min-width: 260px !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            align-self: flex-end !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-affected-records-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="stVerticalBlock"]:has(.sim-panel-filters-row-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"]:has(.sim-affected-records-marker) {{
+            flex: 0 0 auto !important;
+            margin-left: auto !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            align-self: flex-end !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) {{
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) > div[data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) > div[data-testid="stVerticalBlock"] {{
+            align-items: flex-start !important;
+            width: 100% !important;
+        }}
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) [data-testid="stSelectbox"],
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"],
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"] > div,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) [data-testid="stSelectbox"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"] > div {{
             width: 100% !important;
             max-width: 100% !important;
-            overflow: visible !important;
         }}
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel),
-        [data-testid="stElementContainer"]:has(.sim-panel-header-wrap) + [data-testid="stElementContainer"] [data-testid="column"]:has(.elx-filter-panel),
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) {{
-            min-width: 0 !important;
+        [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-planning-level-marker) > [data-testid="stHorizontalBlock"]:has([class*="st-key-sim_plan_btn_"]),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-planning-level-marker) > [data-testid="stHorizontalBlock"]:has([class*="st-key-sim_plan_btn_"]) {{
+            justify-content: center !important;
+            gap: 4px !important;
         }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) {{
             height: auto !important;
@@ -864,15 +1204,9 @@ def inject_css() -> None:
             max-height: none !important;
             align-self: flex-end !important;
         }}
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) [data-testid="stSelectbox"],
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"],
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div,
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) [data-testid="stSelectbox"],
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"],
-        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) div[data-baseweb="select"] > div {{
-            width: 100% !important;
-            min-width: 0 !important;
-            max-width: 100% !important;
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) > div[data-testid="stVerticalBlock"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) > div[data-testid="stVerticalBlock"] {{
+            align-items: flex-start !important;
         }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel) [data-testid="stWidgetLabel"] {{
             display: none !important;
@@ -891,6 +1225,97 @@ def inject_css() -> None:
             margin: 0 0 4px 2px !important;
             opacity: 1 !important;
             visibility: visible !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.sim-planning-level-marker) {{
+            flex: 1 1 auto !important;
+            min-width: 240px !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button {{
+            height: 32px !important;
+            min-height: 32px !important;
+            padding: 0 8px !important;
+            font-size: 10px !important;
+            font-weight: 600 !important;
+            border-radius: 4px !important;
+            border: none !important;
+            box-shadow: none !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button p,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button span,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button div,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button [data-testid="stMarkdownContainer"] {{
+            background: transparent !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) {{
+            background: {_PANEL_PLAN_BTN_BG_ENABLED} !important;
+            background-color: {_PANEL_PLAN_BTN_BG_ENABLED} !important;
+            background-image: none !important;
+            border: none !important;
+            color: {_PANEL_PLAN_BTN_TEXT_ENABLED} !important;
+            cursor: pointer !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) p,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) span,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) div,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:not(:disabled) [data-testid="stMarkdownContainer"] {{
+            color: {_PANEL_PLAN_BTN_TEXT_ENABLED} !important;
+            -webkit-text-fill-color: {_PANEL_PLAN_BTN_TEXT_ENABLED} !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] {{
+            background: rgba(255, 255, 255, 0.22) !important;
+            border: none !important;
+            color: {_PANEL_PLAN_BTN_TEXT_ACTIVE} !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] p,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] span,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] div,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="primary"] [data-testid="stMarkdownContainer"] {{
+            color: {_PANEL_PLAN_BTN_TEXT_ACTIVE} !important;
+            -webkit-text-fill-color: {_PANEL_PLAN_BTN_TEXT_ACTIVE} !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button[kind="secondary"]:disabled {{
+            background: {_PANEL_PLAN_BTN_BG_DISABLED} !important;
+            background-color: {_PANEL_PLAN_BTN_BG_DISABLED} !important;
+            background-image: none !important;
+            border: none !important;
+            color: {_PANEL_PLAN_BTN_TEXT} !important;
+            opacity: 1 !important;
+            cursor: not-allowed !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled p,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled span,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled div,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [class*="st-key-sim_plan_btn_"] button:disabled [data-testid="stMarkdownContainer"] {{
+            color: {_PANEL_PLAN_BTN_TEXT} !important;
+            -webkit-text-fill-color: {_PANEL_PLAN_BTN_TEXT} !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] .sim-affected-records {{
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-end !important;
+            gap: 8px !important;
+            flex-wrap: nowrap !important;
+            white-space: nowrap !important;
+            min-height: 32px !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] .elx-affected-records-lbl {{
+            text-align: right !important;
+            margin: 0 !important;
+            display: inline !important;
+            white-space: nowrap !important;
+        }}
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] .sim-affected-records-val {{
+            color: #ffffff !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            min-height: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: flex-end !important;
+            white-space: nowrap !important;
         }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_panel_header_wrap"] [data-testid="column"]:has(.elx-filter-panel-labeled) div[data-baseweb="select"] > div {{
             background-color: rgba(255, 255, 255, 0.12) !important;
@@ -1503,8 +1928,10 @@ def inject_css() -> None:
         }}
         [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"]:has([class*="st-key-sim_side_submit_"]),
         [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"]:has([class*="st-key-sim_side_infl_calc_"]),
+        [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"]:has([class*="st-key-sim_side_pc_totals_"]),
         [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"]:has([class*="st-key-sim_side_submit_"]),
-        [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"]:has([class*="st-key-sim_side_infl_calc_"]) {{
+        [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"]:has([class*="st-key-sim_side_infl_calc_"]),
+        [data-testid="column"]:has(.sim-sidebar-marker) [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"]:has([class*="st-key-sim_side_pc_totals_"]) {{
             margin-top: {_SIDE_CARD_GAP} !important;
         }}
         .sim-sidebar-marker {{ display: none !important; }}
@@ -1524,9 +1951,18 @@ def inject_css() -> None:
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) [data-testid="column"],
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) [data-testid="stMarkdownContainer"],
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) .stHtml,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker),
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) > div,
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) [data-testid="stVerticalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) [data-testid="stHorizontalBlock"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) [data-testid="stElementContainer"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) [data-testid="column"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) [data-testid="stMarkdownContainer"],
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) .stHtml,
         .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-card-marker),
         .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-submit-marker),
-        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker) {{
+        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-infl-calc-marker),
+        .block-container:has(#simulate-page) [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-side-pc-totals-marker) {{
             border: 1px solid {_SIDE_SUBMIT_BORDER} !important;
             border-radius: {_SIDE_CARD_RADIUS} !important;
             overflow: hidden !important;
@@ -1539,9 +1975,11 @@ def inject_css() -> None:
         .block-container:has(#simulate-page) [class*="st-key-sim_side_impact"],
         .block-container:has(#simulate-page) [class*="st-key-sim_side_submit_"],
         .block-container:has(#simulate-page) [class*="st-key-sim_side_infl_calc_"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_side_pc_totals_"],
         .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-card-marker),
         .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-submit-marker),
-        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-infl-calc-marker) {{
+        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-infl-calc-marker),
+        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-pc-totals-marker) {{
             border: 1px solid {_SIDE_SUBMIT_BORDER} !important;
             border-radius: {_SIDE_CARD_RADIUS} !important;
             padding: 0 !important;
@@ -1560,15 +1998,20 @@ def inject_css() -> None:
         .block-container:has(#simulate-page) [class*="st-key-sim_side_infl_calc_"] [data-testid="stVerticalBlock"],
         .block-container:has(#simulate-page) [class*="st-key-sim_side_infl_calc_"] [data-testid="stElementContainer"],
         .block-container:has(#simulate-page) [class*="st-key-sim_side_infl_calc_"] .stHtml,
+        .block-container:has(#simulate-page) [class*="st-key-sim_side_pc_totals_"] [data-testid="stVerticalBlock"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_side_pc_totals_"] [data-testid="stElementContainer"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_side_pc_totals_"] .stHtml,
         .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-card-marker) .stHtml,
         .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-submit-marker) .stHtml,
-        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-infl-calc-marker) .stHtml {{
+        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-infl-calc-marker) .stHtml,
+        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-side-pc-totals-marker) .stHtml {{
             padding: 0 !important;
             margin: 0 !important;
         }}
         .sim-side-card-marker,
         .sim-side-submit-marker,
-        .sim-side-infl-calc-marker {{ display: none !important; }}
+        .sim-side-infl-calc-marker,
+        .sim-side-pc-totals-marker {{ display: none !important; }}
         .sim-side-card-gap,
         [data-testid="stElementContainer"]:has(.sim-side-card-gap),
         [data-testid="stMarkdownContainer"]:has(.sim-side-card-gap),
@@ -1588,7 +2031,8 @@ def inject_css() -> None:
             line-height: 0 !important;
             box-shadow: none !important;
         }}
-        .block-container:has(#simulate-page) [class*="st-key-sim_side_infl_calc_"] {{
+        .block-container:has(#simulate-page) [class*="st-key-sim_side_infl_calc_"],
+        .block-container:has(#simulate-page) [class*="st-key-sim_side_pc_totals_"] {{
             margin-top: {_SIDE_CARD_GAP} !important;
         }}
 
@@ -2205,7 +2649,7 @@ def inject_paint_js() -> None:
               });
             }
             doc.querySelectorAll(
-              '[class*="st-key-sim_side_impact"], [class*="st-key-sim_side_submit_"], [class*="st-key-sim_side_infl_calc_"]'
+              '[class*="st-key-sim_side_impact"], [class*="st-key-sim_side_submit_"], [class*="st-key-sim_side_infl_calc_"], [class*="st-key-sim_side_pc_totals_"]'
             ).forEach((card) => {
               paintFramedSideCard(card);
             });
@@ -2227,7 +2671,7 @@ def inject_paint_js() -> None:
                 '[data-testid="stVerticalBlock"], [data-testid="stElementContainer"], [data-testid="stVerticalBlockBorderWrapper"]'
               ).forEach(paintSideGap);
             });
-            doc.querySelectorAll('[class*="st-key-sim_side_infl_calc_"]').forEach((card) => {
+            doc.querySelectorAll('[class*="st-key-sim_side_infl_calc_"], [class*="st-key-sim_side_pc_totals_"]').forEach((card) => {
               card.style.setProperty("margin-top", sideCardGap, "important");
             });
 
@@ -2819,18 +3263,65 @@ def inject_paint_js() -> None:
             }
             function paintPanelHeaderDropdowns(root) {
               if (!root) return;
-              root.querySelectorAll('[data-testid="column"]').forEach((col) => {
-                col.style.setProperty("min-width", "0", "important");
-                col.style.setProperty("overflow", "visible", "important");
+              const panelGap = "12px";
+              const panelDdWidth = "100%";
+              const panelFilterPad = "{_PANEL_HEADER_FILTER_PAD}";
+              const navy = "#042A57";
+              root.querySelectorAll('[class*="st-key-sim_panel_filters_wrap"]').forEach((wrap) => {
+                wrap.style.setProperty("padding", panelFilterPad, "important");
+                wrap.style.setProperty("box-sizing", "border-box", "important");
+                wrap.style.setProperty("background", navy, "important");
+                wrap.style.setProperty("background-color", navy, "important");
+                wrap.style.setProperty("margin", "0", "important");
+              });
+              root.querySelectorAll('[class*="st-key-sim_panel_filters_wrap"] [data-testid="stHorizontalBlock"]').forEach((row) => {
+                if (!row.querySelector(".sim-panel-period-col-marker")) return;
+                row.style.setProperty("justify-content", "space-between", "important");
+                row.style.setProperty("align-items", "flex-end", "important");
+                row.style.setProperty("width", "calc(100% - 32px)", "important");
+                row.style.setProperty("max-width", "calc(100% - 32px)", "important");
+                row.style.setProperty("gap", panelGap, "important");
+                row.style.setProperty("padding", "0", "important");
+                row.style.setProperty("margin", "0 16px 16px 16px", "important");
+                row.style.setProperty("box-sizing", "border-box", "important");
+                row.querySelectorAll(':scope > [data-testid="column"]').forEach((col) => {
+                  col.style.setProperty("padding-left", "0", "important");
+                  col.style.setProperty("padding-right", "0", "important");
+                  col.style.setProperty("align-self", "flex-end", "important");
+                  if (col.querySelector(".sim-planning-level-marker")) {
+                    col.style.setProperty("flex", "1 1 auto", "important");
+                    col.style.setProperty("min-width", "260px", "important");
+                  } else if (col.querySelector(".sim-affected-records-marker")) {
+                    col.style.setProperty("flex", "0 0 auto", "important");
+                    col.style.setProperty("margin-left", "auto", "important");
+                  } else {
+                    col.style.setProperty("flex", "0 0 auto", "important");
+                    col.style.setProperty("width", "auto", "important");
+                    col.style.setProperty("max-width", "none", "important");
+                  }
+                });
+              });
+              root.querySelectorAll('[data-testid="column"]:has(.sim-panel-dd-75-marker) > div[data-testid="stVerticalBlock"]').forEach((vb) => {
+                vb.style.setProperty("align-items", "flex-start", "important");
+                vb.style.setProperty("width", "100%", "important");
+              });
+              root.querySelectorAll('[data-testid="column"]:has(.elx-filter-panel):not(:has(.sim-panel-dd-75-marker)) > div[data-testid="stVerticalBlock"]').forEach((vb) => {
+                vb.style.setProperty("align-items", "flex-start", "important");
+                vb.style.setProperty("width", "auto", "important");
               });
               root.querySelectorAll(".elx-filter-upper-lbl, .elx-filter-panel-lbl").forEach((lbl) => {
-                lbl.style.setProperty("display", "block", "important");
+                const inAffectedRow = !!lbl.closest(".sim-affected-records");
+                lbl.style.setProperty("display", inAffectedRow ? "inline" : "block", "important");
                 lbl.style.setProperty("color", "#ffffff", "important");
                 lbl.style.setProperty("-webkit-text-fill-color", "#ffffff", "important");
-                lbl.style.setProperty("font-size", "11px", "important");
+                lbl.style.setProperty("font-size", inAffectedRow ? "11px" : "11px", "important");
                 lbl.style.setProperty("font-weight", "600", "important");
                 lbl.style.setProperty("opacity", "1", "important");
                 lbl.style.setProperty("visibility", "visible", "important");
+                if (inAffectedRow) {
+                  lbl.style.setProperty("margin", "0", "important");
+                  lbl.style.setProperty("white-space", "nowrap", "important");
+                }
                 const md = lbl.closest('[data-testid="stMarkdownContainer"]');
                 if (md) {
                   md.style.setProperty("color", "#ffffff", "important");
@@ -2840,10 +3331,63 @@ def inject_paint_js() -> None:
                   });
                 }
               });
-              root.querySelectorAll('[data-testid="column"] div[data-baseweb="select"]').forEach((sel) => {
-                sel.style.setProperty("width", "100%", "important");
+              root.querySelectorAll(".sim-affected-records").forEach((row) => {
+                row.style.setProperty("display", "flex", "important");
+                row.style.setProperty("align-items", "center", "important");
+                row.style.setProperty("justify-content", "flex-end", "important");
+                row.style.setProperty("gap", "8px", "important");
+                row.style.setProperty("flex-wrap", "nowrap", "important");
+                row.style.setProperty("white-space", "nowrap", "important");
+                row.style.setProperty("min-height", "32px", "important");
+              });
+              root.querySelectorAll(".sim-affected-records-val").forEach((val) => {
+                val.style.setProperty("display", "inline-flex", "important");
+                val.style.setProperty("align-items", "center", "important");
+                val.style.setProperty("font-size", "14px", "important");
+                val.style.setProperty("font-weight", "700", "important");
+                val.style.setProperty("color", "#ffffff", "important");
+              });
+              root.querySelectorAll('[class*="st-key-sim_plan_btn_"] button').forEach((btn) => {
+                const isDisabled = btn.disabled;
+                const isPrimary = btn.getAttribute("kind") === "primary" && !isDisabled;
+                const disabledBg = "#CBCBCB1A";
+                const disabledText = "#70737B";
+                const enabledText = "#ffffff";
+                const primaryBg = "rgba(255, 255, 255, 0.22)";
+                let textColor = disabledText;
+                let bg = disabledBg;
+                if (isPrimary) {
+                  textColor = enabledText;
+                  bg = primaryBg;
+                } else if (!isDisabled) {
+                  textColor = enabledText;
+                  bg = "#FFFFFF1A";
+                }
+                btn.style.setProperty("border", "none", "important");
+                btn.style.setProperty("border-radius", "4px", "important");
+                btn.style.setProperty("box-shadow", "none", "important");
+                btn.style.setProperty("color", textColor, "important");
+                btn.style.setProperty("background", bg, "important");
+                btn.style.setProperty("background-color", bg, "important");
+                btn.style.setProperty("background-image", "none", "important");
+                if (isDisabled) {
+                  btn.style.setProperty("opacity", "1", "important");
+                  btn.style.setProperty("cursor", "not-allowed", "important");
+                } else {
+                  btn.style.setProperty("cursor", "pointer", "important");
+                }
+                btn.querySelectorAll("p, span, div, [data-testid='stMarkdownContainer']").forEach((inner) => {
+                  inner.style.setProperty("background", "transparent", "important");
+                  inner.style.setProperty("background-color", "transparent", "important");
+                  inner.style.setProperty("color", textColor, "important");
+                  inner.style.setProperty("-webkit-text-fill-color", textColor, "important");
+                  inner.style.setProperty("box-shadow", "none", "important");
+                });
+              });
+              root.querySelectorAll('[data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"], [data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"] > div').forEach((sel) => {
+                sel.style.setProperty("width", panelDdWidth, "important");
                 sel.style.setProperty("min-width", "0", "important");
-                sel.style.setProperty("max-width", "100%", "important");
+                sel.style.setProperty("max-width", panelDdWidth, "important");
                 sel.style.setProperty("overflow", "visible", "important");
                 sel.style.setProperty("cursor", "pointer", "important");
               });
@@ -2862,10 +3406,10 @@ def inject_paint_js() -> None:
                   });
                 }
               });
-              root.querySelectorAll('[data-testid="column"] div[data-baseweb="select"] > div').forEach((sel) => {
-                sel.style.setProperty("width", "100%", "important");
+              root.querySelectorAll('[data-testid="column"]:has(.sim-panel-dd-75-marker) div[data-baseweb="select"] > div').forEach((sel) => {
+                sel.style.setProperty("width", panelDdWidth, "important");
                 sel.style.setProperty("min-width", "0", "important");
-                sel.style.setProperty("max-width", "100%", "important");
+                sel.style.setProperty("max-width", panelDdWidth, "important");
                 sel.style.setProperty("overflow", "visible", "important");
                 sel.style.setProperty("cursor", "pointer", "important");
                 sel.style.setProperty("background-color", "rgba(255, 255, 255, 0.12)", "important");
@@ -2909,7 +3453,10 @@ def inject_paint_js() -> None:
                 root.style.setProperty("margin", "0", "important");
                 root.querySelectorAll(
                   '[data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"], [data-testid="stElementContainer"], [data-testid="column"], .stHtml, [data-testid="stMarkdownContainer"], [data-testid="stSelectbox"]'
-                ).forEach((node) => paintPanelHeaderNode(node, navy));
+                ).forEach((node) => {
+                  if (node.closest('[class*="st-key-sim_plan_btn_"]')) return;
+                  paintPanelHeaderNode(node, navy);
+                });
                 const wrap = root.querySelector(".sim-panel-header-wrap");
                 const wrapRow = wrap?.closest('[data-testid="stElementContainer"]');
                 const pillsRow = wrapRow?.nextElementSibling;
@@ -2918,21 +3465,20 @@ def inject_paint_js() -> None:
                   paintPanelHeaderNode(pillsRow, navy);
                   pillsRow.style.setProperty("padding", "0 16px 16px 16px", "important");
                   pillsRow.style.setProperty("margin", "0", "important");
-                  const pillBlock = pillsRow.querySelector('[data-testid="stHorizontalBlock"]');
-                  if (pillBlock) {
-                    pillBlock.style.setProperty("justify-content", "flex-start", "important");
-                    pillBlock.style.setProperty("gap", "12px", "important");
-                    pillBlock.style.setProperty("width", "100%", "important");
-                    pillBlock.style.setProperty("overflow", "visible", "important");
-                  }
+                  pillsRow.style.setProperty("box-sizing", "border-box", "important");
                   pillsRow.querySelectorAll(
                     '[data-testid="stHorizontalBlock"], [data-testid="column"], [data-testid="stSelectbox"]'
                   ).forEach((node) => paintPanelHeaderNode(node, navy));
                 }
                 paintPanelHeaderDropdowns(root);
+                doc.querySelectorAll('[class*="st-key-sim_panel_filters_wrap"]').forEach((wrap) => {
+                  wrap.style.setProperty("padding", "0 16px 16px 16px", "important");
+                  wrap.style.setProperty("box-sizing", "border-box", "important");
+                });
               });
             }
             paintPanelHeader();
+            paintPanelHeaderDropdowns(doc);
 
             doc.querySelectorAll("#navbar-bar-marker").forEach((marker) => {
               const nav = marker.closest('[data-testid="stElementContainer"]');
@@ -3251,6 +3797,13 @@ _FIELD_WIDGET_VERSION = 9
 _DELIVERY_MIX_TITLE = "Direct Delivery"
 _INFLATION_RATES_TITLE = "Inflation Rates"
 _PROCESS_COST_TITLES = frozenset({"Process cost", "Project Costs (EUR)"})
+_PC_TOTAL_SIDEBAR_LABELS = {
+    "PTC": "PTC Total",
+    "STC": "STC Total",
+    "SWC Var": "SWC Var",
+    "SWC Fixed": "SWC Fixed",
+    "SWC Obs. fix.": "SWC Obs Fixed",
+}
 _INFLATION_CALC_TO_IMPACT = {
     "PTC": "PTC impact",
     "STC": "STC impact",
@@ -3345,14 +3898,12 @@ def _persist_pc_matrix_displays(index: int) -> None:
     config = db_st.get_process_cost_matrix_config()
     for row in config["input_rows"]:
         for col in range(len(config["columns"])):
-            key = _pc_matrix_key(index, row["key"], col)
-            raw = st.session_state.get(key, "")
-            parsed = _parse_pc_cell_text(str(raw))
-            default = _pc_matrix_default(row["key"], col)
-            value = parsed if parsed is not None else default
+            value = _pc_matrix_persist_value(index, row["key"], col)
             display = _pc_display_str(value)
             saved_key = _pc_matrix_saved_key(index, row["key"], col)
+            draft_key = _pc_draft_key(index, row["key"], col)
             st.session_state[saved_key] = display
+            st.session_state[draft_key] = display
 
 
 def _persist_group_field_displays(index: int, group: dict[str, Any]) -> None:
@@ -3548,7 +4099,7 @@ def _is_process_cost_group(group: dict[str, Any]) -> bool:
 
 
 _INFL_MATRIX_VERSION = 5
-_PC_MATRIX_VERSION = 2
+_PC_MATRIX_VERSION = 4
 _INFL_PCT_FIELD = {"value": 0.0, "min": None, "max": None, "step": 0.1}
 _PC_INT_FIELD = {"value": 0, "min": None, "max": None, "step": None}
 
@@ -3687,6 +4238,18 @@ def _pc_matrix_saved_key(group_index: int, row_key: str, col: int) -> str:
     return f"sim_pc_saved_{group_index}_{row_key}_{col}"
 
 
+def _pc_draft_key(group_index: int, row_key: str, col: int) -> str:
+    return f"sim_pc_draft_{group_index}_{row_key}_{col}"
+
+
+def _pc_staged_key(group_index: int) -> str:
+    return f"sim_pc_staged_{group_index}"
+
+
+def _pc_staged_cell_id(row_key: str, col: int) -> str:
+    return f"{row_key}_{col}"
+
+
 def _pc_matrix_ver_key(group_index: int) -> str:
     return f"sim_pc_ver_{group_index}"
 
@@ -3699,6 +4262,13 @@ def _parse_pc_cell_text(raw: str) -> int | None:
         return int(float(text))
     except ValueError:
         return None
+
+
+def _pc_value_from_state(raw: Any, default: int) -> int:
+    if isinstance(raw, (int, float)):
+        return int(round(float(raw)))
+    parsed = _parse_pc_cell_text(str(raw))
+    return int(default if parsed is None else parsed)
 
 
 def _pc_display_str(value: Any) -> str:
@@ -3715,6 +4285,7 @@ def _ensure_pc_matrix_version(group_index: int) -> None:
         for col in range(len(config["columns"])):
             st.session_state.pop(_pc_matrix_key(group_index, row["key"], col), None)
             st.session_state.pop(_pc_matrix_saved_key(group_index, row["key"], col), None)
+            st.session_state.pop(_pc_draft_key(group_index, row["key"], col), None)
     st.session_state[ver_key] = _PC_MATRIX_VERSION
 
 
@@ -3728,14 +4299,82 @@ def _ensure_pc_matrix_cell_state(group_index: int, row_key: str, col: int) -> No
         st.session_state[key] = _pc_display_str(st.session_state[key])
 
 
-def _pc_matrix_cell_value(group_index: int, row_key: str, col: int) -> int:
-    key = _pc_matrix_key(group_index, row_key, col)
+def _pc_matrix_raw_value(group_index: int, row_key: str, col: int) -> int:
+    """Read a process-cost cell from widget, draft, or saved state."""
     default = _pc_matrix_default(row_key, col)
-    raw = st.session_state.get(key, _pc_display_str(default))
-    if isinstance(raw, (int, float)):
-        return int(round(float(raw)))
-    parsed = _parse_pc_cell_text(str(raw))
-    return int(default if parsed is None else parsed)
+    key = _pc_matrix_key(group_index, row_key, col)
+    saved_key = _pc_matrix_saved_key(group_index, row_key, col)
+    draft_key = _pc_draft_key(group_index, row_key, col)
+    if _group_is_saved(group_index):
+        state_keys = (saved_key, key, draft_key)
+    else:
+        state_keys = (key, draft_key, saved_key)
+    for state_key in state_keys:
+        if state_key not in st.session_state:
+            continue
+        return _pc_value_from_state(st.session_state[state_key], default)
+    return default
+
+
+def _pc_read_cell_live_value(group_index: int, row_key: str, col: int) -> int:
+    """Best-effort read from widget/draft session keys (no widget instantiation required)."""
+    default = _pc_matrix_default(row_key, col)
+    key = _pc_matrix_key(group_index, row_key, col)
+    draft_key = _pc_draft_key(group_index, row_key, col)
+    best = default
+    for state_key in (key, draft_key):
+        if state_key not in st.session_state:
+            continue
+        value = _pc_value_from_state(st.session_state[state_key], default)
+        if value != default or best == default:
+            best = value
+    return best
+
+
+def _pc_matrix_persist_value(group_index: int, row_key: str, col: int) -> int:
+    """Read staged or live values for Save — never write back to widget keys."""
+    default = _pc_matrix_default(row_key, col)
+    cell_id = _pc_staged_cell_id(row_key, col)
+    staged: dict[str, int] = st.session_state.get(_pc_staged_key(group_index), {})
+    if cell_id in staged:
+        return int(staged[cell_id])
+    return _pc_read_cell_live_value(group_index, row_key, col)
+
+
+def _sync_pc_draft_cell(group_index: int, row_key: str, col: int) -> None:
+    draft_key = _pc_draft_key(group_index, row_key, col)
+    default = _pc_matrix_default(row_key, col)
+    st.session_state[draft_key] = _pc_display_str(
+        _pc_read_cell_live_value(group_index, row_key, col)
+    )
+
+
+def _capture_pc_matrix_drafts(group_index: int) -> None:
+    config = db_st.get_process_cost_matrix_config()
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            _sync_pc_draft_cell(group_index, row["key"], col)
+
+
+def _capture_pc_staged_values(group_index: int, *, preserve_non_default: bool = False) -> None:
+    """Copy live process-cost values into staging keys (safe after render or on Save click)."""
+    config = db_st.get_process_cost_matrix_config()
+    staged: dict[str, int] = dict(st.session_state.get(_pc_staged_key(group_index), {}))
+    for row in config["input_rows"]:
+        for col in range(len(config["columns"])):
+            cell_id = _pc_staged_cell_id(row["key"], col)
+            default = _pc_matrix_default(row["key"], col)
+            new_value = _pc_read_cell_live_value(group_index, row["key"], col)
+            if preserve_non_default:
+                prev = staged.get(cell_id)
+                if prev is not None and prev != default and new_value == default:
+                    continue
+            staged[cell_id] = new_value
+    st.session_state[_pc_staged_key(group_index)] = staged
+
+
+def _pc_matrix_cell_value(group_index: int, row_key: str, col: int) -> int:
+    return _pc_matrix_raw_value(group_index, row_key, col)
 
 
 def _pc_matrix_cell_display(group_index: int, row_key: str, col: int) -> str:
@@ -3746,13 +4385,8 @@ def _pc_matrix_cell_display(group_index: int, row_key: str, col: int) -> str:
 
 
 def _pc_matrix_cell_has_user_entry(group_index: int, row_key: str, col: int) -> bool:
-    key = _pc_matrix_key(group_index, row_key, col)
     default = _pc_matrix_default(row_key, col)
-    raw = st.session_state.get(key, _pc_display_str(default))
-    parsed = _parse_pc_cell_text(str(raw))
-    if parsed is None:
-        return False
-    return int(parsed) != int(default)
+    return _pc_matrix_raw_value(group_index, row_key, col) != int(default)
 
 
 def _compute_pc_column_totals(group_index: int) -> list[int]:
@@ -3765,6 +4399,57 @@ def _compute_pc_column_totals(group_index: int) -> list[int]:
         )
         totals.append(int(total))
     return totals
+
+
+def _pc_total_sidebar_label(col_name: str) -> str:
+    return _PC_TOTAL_SIDEBAR_LABELS.get(col_name, f"{col_name} Total")
+
+
+def _format_process_cost_total_eur(value: int | float) -> str:
+    """Sidebar totals — k suffix only when total >= 1000 (10000 → -€10k, 10 → -€10)."""
+    amount = int(round(float(value)))
+    if amount == 0:
+        return "€0"
+    abs_amount = abs(amount)
+    if abs_amount >= 1000:
+        k = abs_amount / 1000
+        if abs(k - round(k)) < 1e-9:
+            return f"-€{int(round(k))}k"
+        return f"-€{k:.1f}k"
+    return f"-€{abs_amount}"
+
+
+def _process_cost_totals_display_rows(group_index: int) -> list[dict[str, Any]]:
+    config = db_st.get_process_cost_matrix_config()
+    totals = _compute_pc_column_totals(group_index)
+    rows: list[dict[str, Any]] = []
+    for col_idx, col_name in enumerate(config["columns"]):
+        total = totals[col_idx]
+        rows.append({
+            "name": _pc_total_sidebar_label(col_name),
+            "value": _format_process_cost_total_eur(total),
+            "value_class": "red" if total != 0 else "neutral",
+        })
+    return rows
+
+
+def _process_cost_totals_from_entry(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for field in entry.get("calculated_fields") or []:
+        raw = field.get("value", 0)
+        if isinstance(raw, (int, float)):
+            display = _format_process_cost_total_eur(raw)
+        else:
+            display = str(raw)
+        name = str(field.get("name", ""))
+        if name.startswith("Total — "):
+            name = _pc_total_sidebar_label(name.removeprefix("Total — "))
+        rows.append({
+            "name": name,
+            "value": display,
+            "value_class": field.get("value_class", "red" if display != "€0" else "neutral"),
+        })
+    return rows
 
 
 def _inflation_impact_field_index(group: dict[str, Any], impact_name: str) -> int | None:
@@ -3852,6 +4537,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
         st.session_state.pop(_infl_calc_key(i), None)
         st.session_state.pop(_infl_matrix_ver_key(i), None)
         st.session_state.pop(_pc_matrix_ver_key(i), None)
+        st.session_state.pop(_pc_staged_key(i), None)
         infl_config = db_st.get_inflation_matrix_config()
         for row in infl_config["input_rows"]:
             for col in range(len(infl_config["columns"])):
@@ -3863,6 +4549,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
             for col in range(len(pc_config["columns"])):
                 st.session_state.pop(_pc_matrix_key(i, row["key"], col), None)
                 st.session_state.pop(_pc_matrix_saved_key(i, row["key"], col), None)
+                st.session_state.pop(_pc_draft_key(i, row["key"], col), None)
         for fi, _field in enumerate(group.get("fields", [])):
             key = _field_key(i, fi)
             st.session_state.pop(key, None)
@@ -3871,6 +4558,7 @@ def _apply_pending_reset(groups: list[dict[str, Any]]) -> None:
             st.session_state.pop(f"_{key}_wver", None)
     for spec in _PANEL_HEADER_FILTERS:
         st.session_state.pop(spec["key"], None)
+    st.session_state.pop(_PANEL_PLANNING_LEVEL_KEY, None)
     st.session_state.pop(_PANEL_FILTERS_VER_KEY, None)
     for key in (_SCOPE_DRILL_KEY, _SCOPE_VALUE_KEY, _SCOPE_INIT_KEY, "sim_panel_year"):
         st.session_state.pop(key, None)
@@ -4129,25 +4817,20 @@ def _capture_group_submission(
         }
     if _is_process_cost_group(group):
         config = db_st.get_process_cost_matrix_config()
-        for row in config["input_rows"]:
-            for col_idx, col_name in enumerate(config["columns"]):
-                fields.append({
-                    "name": f'{row["label"]} — {col_name}',
-                    "value": _pc_matrix_cell_value(index, row["key"], col_idx),
-                    "suffix": "",
-                })
         totals = _compute_pc_column_totals(index)
         for col_idx, col_name in enumerate(config["columns"]):
+            total = totals[col_idx]
             calculated_fields.append({
-                "name": f"Total — {col_name}",
-                "value": totals[col_idx],
+                "name": _pc_total_sidebar_label(col_name),
+                "value": total,
                 "suffix": "",
+                "value_class": "red" if total != 0 else "neutral",
             })
         return {
             "title": group["title"],
             "status_summary": _status_summary(groups),
             "status_rows": build_status_rows(groups),
-            "fields": fields,
+            "fields": [],
             "calculated_fields": calculated_fields,
         }
     if _is_delivery_mix_group(group):
@@ -4198,6 +4881,8 @@ def _on_save_group(index: int, group: dict[str, Any], groups: list[dict[str, Any
         st.session_state.pop(_dm_staged_key(index), None)
     elif _is_inflation_rates_group(group):
         st.session_state[_infl_calc_key(index)] = _compute_inflation_rates(index, group)
+    elif _is_process_cost_group(group):
+        st.session_state.pop(_pc_staged_key(index), None)
     st.session_state[_SIM_RUN_KEY] = False
     history = st.session_state.setdefault(_SIM_HISTORY_KEY, [])
     history.append(_capture_group_submission(index, group, groups))
@@ -4392,33 +5077,122 @@ def render_parameter_panel_header(data: dict[str, Any], groups: list[dict[str, A
             </div>
             """
         )
-        st.markdown('<span class="sim-panel-filters-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
-        _ensure_panel_filter_state()
-        if not _panel_period_selected():
-            _reset_dependent_panel_filters()
-        _enforce_single_planning_filter()
-        period_enabled = _panel_period_selected()
-        filter_cols = st.columns(5, gap="small", vertical_alignment="bottom")
-        for col, spec in zip(filter_cols, _PANEL_HEADER_FILTERS):
-            key = spec["key"]
-            disabled = _is_panel_filter_disabled(spec, period_enabled=period_enabled)
-            if key == _PANEL_PERIOD_KEY:
-                on_change = _on_panel_period_changed
-            elif key in _PLANNING_FILTER_KEYS:
-                on_change = partial(_on_planning_filter_changed, key)
-            else:
-                on_change = None
-            filter_select(
-                spec["label"],
-                spec["key"],
-                preset=spec["preset"],
-                parent=col,
-                panel_header=True,
-                label_above=spec["label"],
-                placeholder=_PANEL_FILTER_PLACEHOLDER,
-                disabled=disabled,
-                on_change=on_change,
-            )
+        st.markdown('<span class="sim-panel-filters-row-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+        try:
+            filters_wrap = st.container(key="sim_panel_filters_wrap")
+        except TypeError:
+            filters_wrap = st.container()
+        with filters_wrap:
+            _ensure_panel_filter_state()
+            if not _panel_period_selected():
+                _reset_dependent_panel_filters()
+            _sync_planning_level_from_values()
+            _enforce_single_planning_filter()
+            period_enabled = _panel_period_selected()
+            active_level = _active_planning_level_key()
+            period_spec = _PANEL_HEADER_FILTERS[0]
+            filter_cols = st.columns([1, 3.2, 1, 1], gap="small", vertical_alignment="bottom")
+
+            with filter_cols[0]:
+                st.markdown('<span class="sim-panel-period-col-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+                period_dd, _period_sp = st.columns([3, 1], gap="small")
+                with period_dd:
+                    st.markdown('<span class="sim-panel-dd-75-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+                    filter_select(
+                        period_spec["label"],
+                        period_spec["key"],
+                        preset=period_spec["preset"],
+                        parent=period_dd,
+                        panel_header=True,
+                        label_above=period_spec["label"],
+                        placeholder=_PANEL_FILTER_PLACEHOLDER,
+                        on_change=_on_panel_period_changed,
+                    )
+
+            with filter_cols[1]:
+                st.markdown('<span class="sim-planning-level-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="elx-filter-upper-lbl elx-filter-panel-lbl elx-planning-level-heading">'
+                    "Planning Level</div>",
+                    unsafe_allow_html=True,
+                )
+                btn_cols = st.columns(4, gap="xxsmall")
+                level_locked = bool(active_level)
+                for btn_col, spec in zip(btn_cols, _PANEL_PLANNING_SPECS):
+                    level_key = spec["key"]
+                    is_active = active_level == level_key
+                    btn_disabled = (not period_enabled) or (level_locked and not is_active)
+                    btn_type = "primary" if is_active and period_enabled else "secondary"
+                    with btn_col:
+                        try:
+                            btn_col.button(
+                                spec["label"],
+                                key=f"sim_plan_btn_{level_key}",
+                                disabled=btn_disabled,
+                                use_container_width=True,
+                                type=btn_type,
+                                on_click=_on_planning_level_pick,
+                                args=(level_key,),
+                            )
+                        except TypeError:
+                            btn_col.button(
+                                spec["label"],
+                                key=f"sim_plan_btn_{level_key}",
+                                disabled=btn_disabled,
+                                use_container_width=True,
+                                on_click=_on_planning_level_pick,
+                                args=(level_key,),
+                            )
+
+            with filter_cols[2]:
+                st.markdown('<span class="sim-panel-select-col-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+                select_dd, _select_sp = st.columns([3, 1], gap="small")
+                with select_dd:
+                    st.markdown('<span class="sim-panel-dd-75-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+                    if active_level:
+                        value_spec = _planning_level_spec(active_level)
+                        assert value_spec is not None
+                        filter_select(
+                            value_spec["label"],
+                            value_spec["key"],
+                            preset=value_spec["preset"],
+                            parent=select_dd,
+                            panel_header=True,
+                            label_above=f"Select {value_spec['label']}",
+                            placeholder=_PANEL_FILTER_PLACEHOLDER,
+                            disabled=not period_enabled,
+                            on_change=partial(_on_planning_filter_changed, active_level),
+                        )
+                    else:
+                        filter_select(
+                            "Select",
+                            "sim_panel_planning_value_idle",
+                            options=[_PANEL_FILTER_PLACEHOLDER],
+                            parent=select_dd,
+                            panel_header=True,
+                            label_above="Select",
+                            placeholder=_PANEL_FILTER_PLACEHOLDER,
+                            disabled=True,
+                        )
+
+            with filter_cols[3]:
+                st.markdown('<span class="sim-affected-records-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+                forecast_count = _affected_forecast_record_count()
+                count_html = (
+                    f"<strong>{forecast_count}</strong>"
+                    if forecast_count is not None
+                    else "<span style='opacity:0.55;'>—</span>"
+                )
+                _html(
+                    f"""
+                    <div class="sim-affected-records">
+                      <span class="elx-filter-upper-lbl elx-filter-panel-lbl elx-affected-records-lbl">
+                        Affected Forecast Records
+                      </span>
+                      <span class="sim-affected-records-val">{count_html}</span>
+                    </div>
+                    """
+                )
 
 
 def _group_is_open(index: int, group: dict[str, Any]) -> bool:
@@ -4476,8 +5250,15 @@ def render_parameter_group_header(
             elif st.button("Save", key=f"sim_save_{index}", use_container_width=True):
                 if _is_delivery_mix_group(group):
                     _capture_dm_staged_values(index, group)
-                st.session_state[_PENDING_SAVE_KEY] = index
-                st.rerun()
+                    st.session_state[_PENDING_SAVE_KEY] = index
+                    st.rerun()
+                elif _is_process_cost_group(group):
+                    _capture_pc_staged_values(index)
+                    _on_save_group(index, group, groups)
+                    st.rerun()
+                else:
+                    st.session_state[_PENDING_SAVE_KEY] = index
+                    st.rerun()
         with btn_t:
             st.markdown('<span class="sim-toggle-col"></span>', unsafe_allow_html=True)
             if st.button(chevron, key=f"sim_toggle_{index}"):
@@ -5072,7 +5853,14 @@ def _render_pc_matrix_cell_input(
         _render_pc_chip_html(_pc_matrix_cell_display(group_index, row_key, col))
         return
     _ensure_pc_matrix_cell_state(group_index, row_key, col)
-    st.text_input("\u200b", key=key, label_visibility="collapsed")
+    st.text_input(
+        "\u200b",
+        key=key,
+        label_visibility="collapsed",
+        on_change=_sync_pc_draft_cell,
+        args=(group_index, row_key, col),
+    )
+    _sync_pc_draft_cell(group_index, row_key, col)
 
 
 def _pc_matrix_column_weights(num_value_cols: int) -> list[float]:
@@ -5127,6 +5915,10 @@ def _render_pc_matrix_input_table(group_index: int, *, locked: bool) -> None:
         for col_idx, col_widget in enumerate(cols[2:]):
             with col_widget:
                 _render_pc_matrix_cell_input(group_index, row["key"], col_idx, locked=locked)
+
+    if not locked:
+        _capture_pc_staged_values(group_index, preserve_non_default=True)
+        _capture_pc_matrix_drafts(group_index)
 
     totals = _compute_pc_column_totals(group_index)
     cols = st.columns(_pc_matrix_column_weights(len(columns)), gap="small", vertical_alignment="center")
@@ -5432,15 +6224,19 @@ def _side_card(
     card_key: str = "sim_side_card",
     submit: bool = False,
     infl_calc: bool = False,
+    pc_totals: bool = False,
 ) -> None:
     if infl_calc:
         marker = '<span class="sim-side-infl-calc-marker" aria-hidden="true"></span>'
+    elif pc_totals:
+        marker = '<span class="sim-side-pc-totals-marker" aria-hidden="true"></span>'
     elif submit:
         marker = '<span class="sim-side-submit-marker" aria-hidden="true"></span>'
     else:
         marker = '<span class="sim-side-card-marker" aria-hidden="true"></span>'
     try:
-        box = st.container(border=True, key=card_key) if infl_calc else st.container(key=card_key)
+        bordered = infl_calc or pc_totals
+        box = st.container(border=True, key=card_key) if bordered else st.container(key=card_key)
     except TypeError:
         box = st.container()
     with box:
@@ -5666,24 +6462,58 @@ def render_inflation_calculated_card(
     )
 
 
-def _skip_submission_card(entry: dict[str, Any]) -> bool:
-    """Inflation save only drives the calculated rates card below — no sidebar status card."""
-    return entry.get("title") == _INFLATION_RATES_TITLE
+def _process_cost_totals_rows_html(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    parts: list[str] = []
+    for i, row in enumerate(rows):
+        border = "border-bottom:1px solid #eef2f7;" if i < len(rows) - 1 else ""
+        value_class = row.get("value_class", "red")
+        value_color = _VAL.get(value_class, _DANGER)
+        parts.append(
+            f"""
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:{_SUBMIT_SECTION_PAD};{border}font-size:12px;">
+              <span style="font-weight:600;color:{_TEXT_MUTED};">{html.escape(row["name"])}</span>
+              <span style="font-weight:700;color:{value_color};">{html.escape(str(row["value"]))}</span>
+            </div>
+            """
+        )
+    return "".join(parts)
+
+
+def render_process_cost_totals_card(rows: list[dict[str, Any]], card_index: int) -> None:
+    """Right sidebar — PTC/STC/SWC column totals after process cost Save (Figma)."""
+    if not rows:
+        return
+    _side_card(
+        f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;
+            padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;background:{_INPUT_BG};">
+          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">Process Costs</span>
+        </div>
+        {_process_cost_totals_rows_html(rows)}
+        """,
+        card_key=f"sim_side_pc_totals_{card_index}",
+        pc_totals=True,
+    )
 
 
 def render_section_submission_card(entry: dict[str, Any], index: int) -> None:
     """One card per Save — shows submitted section data (Figma status card)."""
     title = html.escape(entry["title"])
     is_direct_delivery_card = entry["title"] == _DELIVERY_MIX_TITLE
+    is_process_cost_card = entry["title"] in _PROCESS_COST_TITLES
+    hide_status = is_direct_delivery_card or is_process_cost_card
     summary_html = ""
-    if not is_direct_delivery_card:
+    if not hide_status:
         summary_html = (
             f'<span style="font-size:12px;font-weight:700;color:#b45309;">'
             f'{html.escape(entry.get("status_summary", ""))}</span>'
         )
     field_block = _submission_field_rows_html(entry.get("fields") or [], compact=True)
     status_block = ""
-    if not is_direct_delivery_card:
+    if not hide_status:
         status_block = _status_rows_html(entry.get("status_rows") or [], compact=True)
     _side_card(
         f"""
@@ -5700,32 +6530,65 @@ def render_section_submission_card(entry: dict[str, Any], index: int) -> None:
     )
 
 
+def _history_entries_by_title(history: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Latest saved snapshot per section title (last save wins)."""
+    by_title: dict[str, dict[str, Any]] = {}
+    for entry in history:
+        title = str(entry.get("title", ""))
+        if title:
+            by_title[title] = entry
+    return by_title
+
+
 def render_submission_history_cards(groups: list[dict[str, Any]]) -> None:
-    """Stack a card below live impact for each section Save."""
+    """Sidebar cards below hierarchy — fixed order: Direct Delivery, Inflation, Process cost."""
     history: list[dict[str, Any]] = st.session_state.get(_SIM_HISTORY_KEY) or []
+    by_title = _history_entries_by_title(history)
+    dm_idx = next((i for i, group in enumerate(groups) if _is_delivery_mix_group(group)), None)
     inflation_idx = next(
         (i for i, group in enumerate(groups) if _is_inflation_rates_group(group)),
         None,
     )
-    for index, entry in enumerate(history):
-        if not _skip_submission_card(entry):
-            _side_card_spacer(f"before_submit_{index}")
-            render_section_submission_card(entry, index)
-        calc_rows = entry.get("calculated_fields") or []
-        if (
-            not calc_rows
-            and inflation_idx is not None
-            and entry.get("title") == _INFLATION_RATES_TITLE
-            and _group_is_saved(inflation_idx)
-        ):
+    pc_idx = next(
+        (i for i, group in enumerate(groups) if _is_process_cost_group(group)),
+        None,
+    )
+    slot = 0
+
+    if dm_idx is not None and _group_is_saved(dm_idx):
+        entry = by_title.get(_DELIVERY_MIX_TITLE)
+        if entry is None:
+            entry = _capture_group_submission(dm_idx, groups[dm_idx], groups)
+        _side_card_spacer("before_submit_dd")
+        render_section_submission_card(entry, slot)
+        slot += 1
+
+    if inflation_idx is not None and _group_is_saved(inflation_idx):
+        entry = by_title.get(_INFLATION_RATES_TITLE)
+        calc_rows = (entry or {}).get("calculated_fields") or []
+        if not calc_rows:
             calc_rows = _inflation_calculated_display_rows(inflation_idx, groups[inflation_idx])
         if calc_rows:
-            _side_card_spacer(f"before_calc_{index}")
+            _side_card_spacer("before_calc_infl")
             render_inflation_calculated_card(
                 calc_rows,
-                index,
+                slot,
                 inflation_group_index=inflation_idx,
             )
+            slot += 1
+
+    if pc_idx is not None and _group_is_saved(pc_idx):
+        entry: dict[str, Any] | None = None
+        for title in _PROCESS_COST_TITLES:
+            if title in by_title:
+                entry = by_title[title]
+                break
+        totals_rows = _process_cost_totals_from_entry(entry) if entry else []
+        if not totals_rows:
+            totals_rows = _process_cost_totals_display_rows(pc_idx)
+        if totals_rows:
+            _side_card_spacer("before_pc_totals")
+            render_process_cost_totals_card(totals_rows, slot)
 
 
 def render_simulate_sidebar(data: dict[str, Any], groups: list[dict[str, Any]]) -> None:
