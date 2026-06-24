@@ -14,9 +14,12 @@ if TYPE_CHECKING:
 _CSS_INJECTED = False
 _JS_INJECTED = False
 _SIM_CTX_CSS_INJECTED = False
+_CTX_BAR_WIDGET_VERSION = 2
 _SELECTBOX_SUPPORTS_FILTER_MODE = "filter_mode" in inspect.signature(st.selectbox).parameters
 _FILTER_H = 32
 _FILTER_CTX_H = 36
+_CTX_FILTER_MIN_W = 50
+_CTX_FILTER_W = 65
 _PANEL_HEADER_FILTER_GAP = "2px"
 PANEL_HEADER_DD_WIDTH = "75%"
 PRESET_OPTIONS: dict[str, list[str]] = {
@@ -40,7 +43,6 @@ PRESET_OPTIONS: dict[str, list[str]] = {
     ],
     "Business Area": ["Europe", "Americas", "APAC", "MEA"],
     "Commercial Area": ["ATED", "EMEA", "NAFTA", "LATAM"],
-    "Panel Country": ["France", "Germany", "Spain", "Italy", "Portugal"],
     "Panel Period": ["BC 202601", "BC 202512", "BC 202511", "BC 202510"],
     "Panel Company": ["FR10", "ES10", "IT16", "PT10"],
 }
@@ -406,6 +408,7 @@ def inject_simulate_context_css() -> None:
             max-width: 100% !important;
         }}
 
+        [data-testid="stElementContainer"]:has(.sim-ctx-outer-marker),
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) {{
             background: #ffffff !important;
             background-color: #ffffff !important;
@@ -417,7 +420,7 @@ def inject_simulate_context_css() -> None:
             padding: 0 !important;
         }}
 
-        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) {{
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) {{
             background: #ffffff !important;
             background-color: #ffffff !important;
             border-bottom: 1px solid #e4eaf2 !important;
@@ -428,6 +431,61 @@ def inject_simulate_context_css() -> None:
             margin-right: 0 !important;
             padding: 12px 20px 10px !important;
             min-height: 58px !important;
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            align-items: center !important;
+            gap: 12px !important;
+            overflow: visible !important;
+        }}
+
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) > [data-testid="column"]:has(.sim-ctx-left-group),
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) > [data-testid="column"]:first-child {{
+            flex: 0 0 auto !important;
+            width: auto !important;
+            min-width: 0 !important;
+            max-width: none !important;
+            overflow: visible !important;
+        }}
+
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) > [data-testid="column"]:has(.sim-ctx-live-col),
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) > [data-testid="column"]:last-child {{
+            flex: 1 1 0 !important;
+            width: auto !important;
+            min-width: 0 !important;
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
+            align-self: center !important;
+            overflow: visible !important;
+            margin-left: auto !important;
+        }}
+
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) > [data-testid="column"]:last-child > div[data-testid="stVerticalBlock"],
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) > [data-testid="column"]:has(.sim-ctx-live-col) > div[data-testid="stVerticalBlock"] {{
+            display: flex !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+
+        .sim-ctx-outer-marker,
+        .sim-ctx-left-group,
+        .sim-ctx-live-col {{
+            display: none !important;
+        }}
+
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) {{
+            background: transparent !important;
+            border-bottom: none !important;
+            box-sizing: border-box !important;
+            width: auto !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            display: flex !important;
             flex-wrap: nowrap !important;
             align-items: flex-end !important;
             gap: 12px !important;
@@ -439,6 +497,8 @@ def inject_simulate_context_css() -> None:
             overflow: visible !important;
         }}
 
+        .block-container:has(#simulate-page) [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker),
+        .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-ctx-outer-marker),
         .block-container:has(#simulate-page) [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker),
         .block-container:has(#simulate-page) [data-testid="stElementContainer"]:has(.sim-ctx-marker) {{
             background: #ffffff !important;
@@ -518,12 +578,28 @@ def inject_simulate_context_css() -> None:
             padding: 0 !important;
         }}
 
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:has(.sim-ctx-title-wrap),
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:has(.sim-ctx-vdiv-wrap),
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:has(.elx-filter-ctx) {{
+            flex: 0 0 auto !important;
+            width: auto !important;
+            min-width: 0 !important;
+            max-width: none !important;
+        }}
+
         [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx),
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) {{
             height: auto !important; min-height: 0 !important; max-height: none !important;
-            min-width: 100px !important; flex: 0 1 130px !important;
+            min-width: {_CTX_FILTER_MIN_W}px !important;
+            max-width: {_CTX_FILTER_W}px !important;
+            flex: 0 0 {_CTX_FILTER_W}px !important;
             align-self: flex-end !important; overflow: visible !important;
             background: #ffffff !important;
+        }}
+        [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) [data-testid="stSelectbox"],
+        [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) div[data-baseweb="select"] {{
+            width: 100% !important;
+            max-width: {_CTX_FILTER_W}px !important;
         }}
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-labeled) div[data-baseweb="select"] > div {{
             background-color: #ffffff !important;
@@ -584,26 +660,9 @@ def inject_simulate_context_css() -> None:
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) [data-testid="column"]:has(.elx-filter-ctx) div[data-baseweb="select"] svg {{
             fill: #011e41 !important;
         }}
-        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child {{
-            display: flex !important;
-            justify-content: flex-end !important;
-            align-items: center !important;
-            align-self: center !important;
-            background: #ffffff !important;
-            margin-left: auto !important;
-        }}
-        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child > div[data-testid="stVerticalBlock"],
-        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child [data-testid="stElementContainer"]:has(.sim-ctx-live),
-        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child [data-testid="stMarkdownContainer"]:has(.sim-ctx-live) {{
-            display: flex !important;
-            justify-content: flex-end !important;
-            align-items: center !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-        }}
-        [data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) .sim-ctx-live {{
-            margin-left: auto !important;
+        [data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker) .sim-ctx-live {{
+            margin-left: 0 !important;
+            margin-right: 0 !important;
         }}
 
         /* Flush white CONTEXT bar directly under navy navbar */
@@ -616,7 +675,11 @@ def inject_simulate_context_css() -> None:
             padding-bottom: 0 !important;
         }}
         [data-testid="stElementContainer"]:has(#navbar-bar-marker)
+            + [data-testid="stElementContainer"]:has(.sim-ctx-outer-marker),
+        [data-testid="stElementContainer"]:has(#navbar-bar-marker)
             + [data-testid="stElementContainer"]:has(.sim-ctx-marker),
+        [data-testid="stElementContainer"]:has(#navbar-bar-marker)
+            + [data-testid="stElementContainer"]:has([data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker)),
         [data-testid="stElementContainer"]:has(#navbar-bar-marker)
             + [data-testid="stElementContainer"]:has([data-testid="stHorizontalBlock"]:has(.sim-ctx-marker)) {{
             margin-top: 0 !important;
@@ -642,41 +705,54 @@ def render_simulate_context_bar(
     *,
     page_marker: bool = True,
 ) -> dict[str, str]:
-    """Figma CONTEXT row: CONTEXT | vdiv | labeled filter_select × N | live chip."""
+    """Figma CONTEXT row: left group (label + filters) | right live chip."""
     if not context_rows:
         return {}
 
     inject_simulate_context_css()
 
     n = len(context_rows)
-    ratios = [0.48, 0.035] + [1.0] * n + [1.55]
-    cols = st.columns(ratios, gap="small", vertical_alignment="bottom")
+    outer_left, outer_right = st.columns([1, 1], gap="small", vertical_alignment="center")
+    outer_left.markdown('<span class="sim-ctx-outer-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
+    outer_left.markdown('<span class="sim-ctx-left-group" aria-hidden="true"></span>', unsafe_allow_html=True)
 
-    # Marker inside columns row (same pattern as dashboard dash-filters-marker).
+    inner_ratios = [0.35, 0.02] + [0.38] * n
+    inner = outer_left.columns(inner_ratios, gap="small", vertical_alignment="center")
+
     page_id = ' id="simulate-page"' if page_marker else ""
-    cols[0].markdown(
-        f'<span{page_id} class="sim-ctx-marker" aria-hidden="true"></span>'
+    inner[0].markdown(
+        f'<span{page_id} class="sim-ctx-marker sim-ctx-title-wrap" aria-hidden="true"></span>'
         '<div class="sim-ctx-title">CONTEXT:</div>',
         unsafe_allow_html=True,
     )
-    cols[1].markdown('<div class="sim-ctx-vdiv" aria-hidden="true"></div>', unsafe_allow_html=True)
+    # inner[1].markdown(
+    #     '<span class="sim-ctx-vdiv-wrap" aria-hidden="true"></span>'
+    #     '<div class="sim-ctx-vdiv" aria-hidden="true"></div>',
+    #     unsafe_allow_html=True,
+    # )
 
     results: dict[str, str] = {}
     presets = {"Area", "Period", "FADP", "Scenario"}
     for i, row in enumerate(context_rows):
         k = row["key"]
+        state_key = f"sim_ctx_{k}"
+        ver_key = f"_{state_key}_wver"
+        if st.session_state.get(ver_key) != _CTX_BAR_WIDGET_VERSION:
+            st.session_state.pop(state_key, None)
+            st.session_state[ver_key] = _CTX_BAR_WIDGET_VERSION
         results[k] = filter_select(
             k,
-            f"sim_ctx_{k}",
+            state_key,
             preset=k if k in presets else None,
-            default=row["value"],
-            parent=cols[2 + i],
+            default=None,
+            parent=inner[2 + i],
             label_above=k.upper(),
             context_bar=True,
         )
 
     live = _format_live_chip_text(live_label)
-    cols[-1].markdown(
+    outer_right.markdown('<span class="sim-ctx-live-col" aria-hidden="true"></span>', unsafe_allow_html=True)
+    outer_right.markdown(
         f'<div class="sim-ctx-live"><span class="dot" aria-hidden="true"></span>{live}</div>',
         unsafe_allow_html=True,
     )
@@ -718,11 +794,15 @@ def filter_select(
     label_above: str | None = None,
     context_bar: bool = False,
     panel_header: bool = False,
+    option_map: dict[str, str] | None = None,
 ) -> str:
     """One compact dropdown showing the selected value only (Figma top row).
 
     ``field_name`` is kept for API compatibility (used in presets). With
     ``label_above``, renders a small uppercase label over the control (simulate CONTEXT bar).
+
+    When ``option_map`` is provided, keys are stored in session state and values
+    are shown in the dropdown (e.g. country_cd → country name).
 
     Args:
         field_name: Preset key / logical name (e.g. ``"Category"``).
@@ -731,16 +811,24 @@ def filter_select(
         preset: Named list in ``PRESET_OPTIONS``.
         default: Initial value.
         parent: Column/container to render into.
+        option_map: Stored value → display label mapping.
 
     Returns:
-        Selected value string.
+        Selected value string (stored key when ``option_map`` is used).
     """
     inject_filter_select_css()
     inject_filter_select_js()
 
-    opts = resolve_options(options, preset=preset, default=default)
-    if not opts:
-        raise ValueError("filter_select requires options or a valid preset with a default")
+    format_func = None
+    if option_map:
+        value_opts = list(option_map.keys())
+        format_func = lambda v, m=option_map: m.get(v, v)
+    else:
+        value_opts = resolve_options(options, preset=preset, default=default)
+
+    opts = list(value_opts)
+    if not opts and not option_map:
+        raise ValueError("filter_select requires options, a valid preset with a default, or option_map")
 
     if placeholder:
         opts = [placeholder, *[o for o in opts if o != placeholder]]
@@ -754,6 +842,11 @@ def filter_select(
             st.session_state[key] = opts[0]
 
     selected = str(st.session_state[key])
+    if option_map:
+        name_to_cd = {v: k for k, v in option_map.items()}
+        if selected in name_to_cd:
+            st.session_state[key] = name_to_cd[selected]
+            selected = name_to_cd[selected]
     if selected not in opts:
         opts = [selected, *opts]
 
@@ -785,6 +878,8 @@ def filter_select(
         "label_visibility": "collapsed",
         "disabled": disabled,
     }
+    if format_func is not None:
+        select_kwargs["format_func"] = format_func
     if on_change is not None:
         select_kwargs["on_change"] = on_change
     if _SELECTBOX_SUPPORTS_FILTER_MODE:

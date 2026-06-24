@@ -32,6 +32,7 @@ _SIDE_CARD_GAP = "12px"
 _SIDE_PANEL_W = 330
 _MAIN_COL_GAP = "16px"
 _SUBMIT_SECTION_PAD = "8px 12px"
+_FOOTER_INNER_PAD = "10px"
 _INPUT_BG = "#F9F9F9"
 _INPUT_BORDER = "#D4DBE6"
 _INPUT_RADIUS = "8px"
@@ -103,12 +104,13 @@ _PANEL_FILTER_PLACEHOLDER = "— Select —"
 _PANEL_PERIOD_KEY = "sim_panel_period"
 _PANEL_PLANNING_LEVEL_KEY = "sim_panel_planning_level"
 _PANEL_FILTERS_VER_KEY = "sim_panel_filters_ver"
-_PANEL_FILTERS_VERSION = 3
+_PANEL_FILTERS_VERSION = 4
+_PANEL_COUNTRY_KEY = "sim_panel_country"
 _PANEL_HEADER_FILTERS: tuple[dict[str, Any], ...] = (
     {"label": "Period", "key": "sim_panel_period", "preset": "Panel Period", "requires_period": False},
     {"label": "Business Area", "key": "sim_panel_business_area", "preset": "Business Area", "requires_period": True},
     {"label": "Commercial Area", "key": "sim_panel_commercial_area", "preset": "Commercial Area", "requires_period": True},
-    {"label": "Country", "key": "sim_panel_country", "preset": "Panel Country", "requires_period": True},
+    {"label": "Country", "key": _PANEL_COUNTRY_KEY, "requires_period": True},
     {"label": "Company", "key": "sim_panel_company", "preset": "Panel Company", "requires_period": True},
 )
 _PLANNING_FILTER_KEYS: tuple[str, ...] = tuple(
@@ -261,6 +263,16 @@ def _panel_filter_value(key: str) -> str:
     return ""
 
 
+def _panel_filter_display_value(key: str) -> str:
+    """Human-readable label for a panel filter (country code → country name)."""
+    val = _panel_filter_value(key)
+    if not val:
+        return ""
+    if key == _PANEL_COUNTRY_KEY:
+        return db_st.country_display_name(val)
+    return val
+
+
 def _deepest_planning_filter_spec() -> dict[str, Any] | None:
     """Most specific planning dimension with a selected value (BA → Commercial → Country → Company)."""
     deepest: dict[str, Any] | None = None
@@ -284,7 +296,7 @@ def _build_hierarchy_level_rows() -> list[dict[str, str]]:
     for spec in _PANEL_HEADER_FILTERS:
         if spec["key"] == _PANEL_PERIOD_KEY:
             continue
-        val = _panel_filter_value(spec["key"])
+        val = _panel_filter_display_value(spec["key"])
         if val:
             rows.append({"name": spec["label"], "value": val})
     return rows
@@ -297,7 +309,7 @@ def _delivery_mix_rows(group: dict[str, Any]) -> list[tuple[int, dict[str, Any]]
     company = _panel_filter_value(_PANEL_COMPANY_KEY)
     rows: list[tuple[int, dict[str, Any]]] = []
     for fi, (dim_key, panel_key) in enumerate(_DELIVERY_MIX_DIMENSIONS):
-        label = _panel_filter_value(panel_key)
+        label = _panel_filter_display_value(panel_key)
         if not label:
             continue
         dd_change = (
@@ -709,6 +721,7 @@ def inject_simulate_layout_css() -> None:
             background-color: #ffffff !important;
             padding: 10px !important;
             margin: 0 !important;
+            border-top: 1px solid #E5E7EB !important;
             box-sizing: border-box !important;
         }
         .block-container:has(#simulate-page) [class*="st-key-sim_footer"] [data-testid="stVerticalBlock"],
@@ -902,6 +915,8 @@ def inject_css() -> None:
         .block-container:has(#simulate-page)
         [data-testid="stElementContainer"]:has(#navbar-bar-marker),
         .block-container:has(#simulate-page)
+        [data-testid="stElementContainer"]:has(.sim-ctx-outer-marker),
+        .block-container:has(#simulate-page)
         [data-testid="stElementContainer"]:has(.sim-ctx-marker) {{
             padding-top: 0 !important;
             margin-top: 0 !important;
@@ -1039,7 +1054,7 @@ def inject_css() -> None:
             margin: 0 !important;
             background: #ffffff !important;
         }}
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [data-testid="stForm"] [data-testid="stElementContainer"] {{
+        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [data-testid="stForm"] [data-testid="stElementContainer"]:not([class*="st-key-sim_footer"]):not(:has(.sim-footer-marker)) {{
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
@@ -1837,16 +1852,13 @@ def inject_css() -> None:
             box-sizing: border-box !important;
         }}
 
-        /* ----- Form footer (Figma) — white + top border ----- */
-        [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) .sim-footer-divider {{
-            border-top: 1px solid {_BORDER} !important;
-        }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [data-testid="stElementContainer"]:has(.sim-footer-marker):has([class*="st-key-sim_reset"]),
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_footer"] {{
             background: {_CARD_BG} !important;
             background-color: {_CARD_BG} !important;
             margin: 0 !important;
-            padding: 10px !important;
+            padding: {_FOOTER_INNER_PAD} !important;
+            border-top: 1px solid {_BORDER} !important;
             box-sizing: border-box !important;
         }}
         [data-testid="stVerticalBlockBorderWrapper"]:has(.sim-main-marker) [class*="st-key-sim_footer"] [data-testid="stVerticalBlock"],
@@ -1866,7 +1878,7 @@ def inject_css() -> None:
             background: {_CARD_BG} !important;
             color: {_PRIMARY} !important;
             border: 1px solid {_BORDER} !important;
-            border-radius: 0 !important;
+            border-radius: {_INPUT_RADIUS} !important;
             font-weight: 600 !important;
             font-size: 13px !important;
             min-height: 42px !important;
@@ -1881,13 +1893,14 @@ def inject_css() -> None:
             background: #f8fafc !important;
             color: {_PRIMARY} !important;
             border: 1px solid {_BORDER} !important;
+            border-radius: {_INPUT_RADIUS} !important;
         }}
         .block-container:has(#simulate-page) [data-testid="column"]:has(.sim-start-col) div[data-testid="stButton"] button,
         .block-container:has(#simulate-page) [class*="st-key-sim_start"] button {{
             background: {_PRIMARY} !important;
             color: #fff !important;
             border: none !important;
-            border-radius: 0 !important;
+            border-radius: {_INPUT_RADIUS} !important;
             font-weight: 600 !important;
             font-size: 13px !important;
             min-height: 42px !important;
@@ -1902,6 +1915,7 @@ def inject_css() -> None:
             background: #013060 !important;
             color: #fff !important;
             border: none !important;
+            border-radius: {_INPUT_RADIUS} !important;
         }}
 
         /* ----- Main layout — left form grows, right sidebar fixed 330px ----- */
@@ -2859,6 +2873,72 @@ def inject_paint_js() -> None:
               el.style.setProperty("padding", "0", "important");
             });
 
+            function simNumericGuardMode(wrap) {
+              if (wrap.closest('[class*="st-key-sim_infl_input_"]')) return "decimal";
+              if (wrap.closest('[class*="st-key-sim_pc_input_"]')) return "int";
+              const col = wrap.closest('[data-testid="column"]');
+              if (col && col.querySelector(".sim-pct-input-marker")) return "int";
+              if (wrap.closest(".sim-delivery-mix-wrap")) return "int";
+              const ddGroup = wrap.closest('[class*="st-key-sim_grp_"]');
+              if (ddGroup && ddGroup.querySelector(".sim-delivery-mix-wrap")) return "int";
+              return null;
+            }
+            function simFilterNumericText(text, mode) {
+              const raw = String(text || "").replace(/,/g, "");
+              if (mode === "int") return raw.replace(/[^0-9]/g, "");
+              let out = "";
+              let hasDot = false;
+              for (let i = 0; i < raw.length; i += 1) {
+                const ch = raw[i];
+                if (ch === "-" && out.length === 0) out += ch;
+                else if (ch === "." && !hasDot) {
+                  out += ch;
+                  hasDot = true;
+                } else if (ch >= "0" && ch <= "9") out += ch;
+              }
+              return out;
+            }
+            function attachSimNumericGuard(input, mode) {
+              if (!input || input.disabled || !mode) return;
+              if (input.dataset.elxNumericGuard === mode) return;
+              input.dataset.elxNumericGuard = mode;
+              input.setAttribute("inputmode", mode === "int" ? "numeric" : "decimal");
+              const navKeys = new Set([
+                "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+                "Home", "End", "Tab", "Enter", "Escape",
+              ]);
+              function applyFiltered(next) {
+                const filtered = simFilterNumericText(next, mode);
+                if (filtered === input.value) return;
+                input.value = filtered;
+                try {
+                  input.setSelectionRange(filtered.length, filtered.length);
+                } catch (_err) {
+                  /* ignore */
+                }
+              }
+              input.addEventListener("keydown", (e) => {
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                if (navKeys.has(e.key)) return;
+                if (e.key === "Backspace" || e.key === "Delete") return;
+                if (e.key.length !== 1) return;
+                const start = input.selectionStart ?? input.value.length;
+                const end = input.selectionEnd ?? input.value.length;
+                const next = input.value.slice(0, start) + e.key + input.value.slice(end);
+                if (simFilterNumericText(next, mode) !== next) e.preventDefault();
+              });
+              input.addEventListener("paste", (e) => {
+                e.preventDefault();
+                const pasted = (e.clipboardData || window.clipboardData).getData("text");
+                const start = input.selectionStart ?? input.value.length;
+                const end = input.selectionEnd ?? input.value.length;
+                applyFiltered(input.value.slice(0, start) + pasted + input.value.slice(end));
+              });
+              input.addEventListener("input", () => {
+                applyFiltered(input.value);
+              });
+            }
+
             function paintPctInputChip(wrap) {
               const col = wrap.closest('[data-testid="column"]');
               const isParam = Boolean(wrap.closest('[class*="st-key-sim_f_"]'));
@@ -2922,6 +3002,8 @@ def inject_paint_js() -> None:
                   input.style.setProperty("opacity", "1", "important");
                   input.style.setProperty("cursor", "default", "important");
                   wrap.style.setProperty("cursor", "default", "important");
+                } else {
+                  attachSimNumericGuard(input, simNumericGuardMode(wrap));
                 }
               });
               if (inInfl) {
@@ -2975,6 +3057,9 @@ def inject_paint_js() -> None:
               if (!col) return;
               const wrap = col.querySelector('div[data-baseweb="input"]');
               if (wrap) paintPctInputChip(wrap);
+            });
+            doc.querySelectorAll('[data-testid="column"]:has(.sim-pct-input-marker) div[data-baseweb="input"] input').forEach((input) => {
+              if (!input.disabled) attachSimNumericGuard(input, "int");
             });
 
             doc.querySelectorAll(".sim-infl-row-label, .sim-infl-pct-val").forEach((el) => {
@@ -3051,6 +3136,9 @@ def inject_paint_js() -> None:
                 input.style.setProperty("width", "100%", "important");
                 input.style.setProperty("padding", "0", "important");
                 input.style.setProperty("box-shadow", "none", "important");
+                if (!input.disabled) {
+                  attachSimNumericGuard(input, simNumericGuardMode(wrap));
+                }
               });
             });
             doc.querySelectorAll(".sim-pc-value-chip").forEach((chip) => {
@@ -3206,7 +3294,7 @@ def inject_paint_js() -> None:
               btn.style.setProperty("background", "#ffffff", "important");
               btn.style.setProperty("color", "#011E41", "important");
               btn.style.setProperty("border", "1px solid #E5E7EB", "important");
-              btn.style.setProperty("border-radius", "0", "important");
+              btn.style.setProperty("border-radius", "8px", "important");
               btn.style.setProperty("font-weight", "600", "important");
               btn.style.setProperty("opacity", "1", "important");
             });
@@ -3214,7 +3302,7 @@ def inject_paint_js() -> None:
               btn.style.setProperty("background", "#011E41", "important");
               btn.style.setProperty("color", "#ffffff", "important");
               btn.style.setProperty("border", "none", "important");
-              btn.style.setProperty("border-radius", "0", "important");
+              btn.style.setProperty("border-radius", "8px", "important");
               btn.style.setProperty("font-weight", "600", "important");
               btn.style.setProperty("opacity", "1", "important");
             });
@@ -3236,6 +3324,10 @@ def inject_paint_js() -> None:
               });
             }
             doc.querySelectorAll('[class*="st-key-sim_footer"]').forEach((box) => {
+              box.style.setProperty("padding", "10px", "important");
+              box.style.setProperty("margin", "0", "important");
+              box.style.setProperty("border-top", "1px solid #E5E7EB", "important");
+              box.style.setProperty("box-sizing", "border-box", "important");
               const row = box.matches('[data-testid="stElementContainer"]')
                 ? box
                 : box.closest('[data-testid="stElementContainer"]');
@@ -3497,21 +3589,67 @@ def inject_paint_js() -> None:
                 next.style.setProperty("padding-top", "0", "important");
               }
             });
-            doc.querySelectorAll(".sim-ctx-marker").forEach((marker) => {
+            doc.querySelectorAll(".sim-ctx-outer-marker").forEach((marker) => {
               const row = marker.closest('[data-testid="stHorizontalBlock"]');
               if (!row) return;
+              row.style.setProperty("display", "flex", "important");
+              row.style.setProperty("align-items", "center", "important");
               row.style.setProperty("background", white, "important");
               row.style.setProperty("background-color", white, "important");
               row.style.setProperty("border-bottom", "1px solid #e4eaf2", "important");
               row.style.setProperty("width", "100%", "important");
               row.style.setProperty("max-width", "100%", "important");
-              row.style.setProperty("margin-left", "0", "important");
-              row.style.setProperty("margin-right", "0", "important");
               row.style.setProperty("padding", "12px 20px 10px", "important");
               row.style.setProperty("min-height", "58px", "important");
               row.style.setProperty("overflow", "visible", "important");
+              const leftCol = row.querySelector(':scope > [data-testid="column"]:has(.sim-ctx-left-group), :scope > [data-testid="column"]:first-child');
+              const rightCol = row.querySelector(':scope > [data-testid="column"]:has(.sim-ctx-live-col), :scope > [data-testid="column"]:last-child');
+              if (leftCol) {
+                leftCol.style.setProperty("flex", "0 0 auto", "important");
+                leftCol.style.setProperty("width", "auto", "important");
+                leftCol.style.setProperty("min-width", "0", "important");
+                leftCol.style.setProperty("overflow", "visible", "important");
+              }
+              if (rightCol) {
+                rightCol.style.setProperty("flex", "1 1 0", "important");
+                rightCol.style.setProperty("display", "flex", "important");
+                rightCol.style.setProperty("justify-content", "flex-end", "important");
+                rightCol.style.setProperty("align-items", "center", "important");
+                rightCol.style.setProperty("align-self", "center", "important");
+                rightCol.style.setProperty("margin-left", "auto", "important");
+                rightCol.style.setProperty("overflow", "visible", "important");
+                const vb = rightCol.querySelector(':scope > [data-testid="stVerticalBlock"]');
+                if (vb) {
+                  vb.style.setProperty("display", "flex", "important");
+                  vb.style.setProperty("justify-content", "flex-end", "important");
+                  vb.style.setProperty("align-items", "center", "important");
+                  vb.style.setProperty("width", "100%", "important");
+                }
+              }
+              const parent = row.closest('[data-testid="stElementContainer"]');
+              if (parent) {
+                parent.style.setProperty("background", white, "important");
+                parent.style.setProperty("background-color", white, "important");
+                parent.style.setProperty("width", "100%", "important");
+                parent.style.setProperty("max-width", "100%", "important");
+                parent.style.setProperty("padding", "0", "important");
+                parent.style.setProperty("overflow", "visible", "important");
+              }
+            });
+            doc.querySelectorAll(".sim-ctx-marker").forEach((marker) => {
+              const row = marker.closest('[data-testid="stHorizontalBlock"]');
+              if (!row) return;
+              row.style.setProperty("background", "transparent", "important");
+              row.style.setProperty("border-bottom", "none", "important");
+              row.style.setProperty("width", "auto", "important");
+              row.style.setProperty("padding", "0", "important");
+              row.style.setProperty("margin", "0", "important");
+              row.style.setProperty("min-height", "0", "important");
+              row.style.setProperty("overflow", "visible", "important");
               row.querySelectorAll('[data-testid="column"]').forEach((col) => {
                 col.style.setProperty("overflow", "visible", "important");
+                col.style.setProperty("flex", "0 0 auto", "important");
+                col.style.setProperty("width", "auto", "important");
               });
               row.querySelectorAll(".elx-filter-upper-lbl").forEach((lbl) => {
                 lbl.style.setProperty("display", "block", "important");
@@ -3519,17 +3657,6 @@ def inject_paint_js() -> None:
                 lbl.style.setProperty("line-height", "1.3", "important");
                 lbl.style.setProperty("margin-bottom", "4px", "important");
               });
-              const parent = row.closest('[data-testid="stElementContainer"]');
-              if (parent) {
-                parent.style.setProperty("background", white, "important");
-                parent.style.setProperty("background-color", white, "important");
-                parent.style.setProperty("width", "100%", "important");
-                parent.style.setProperty("max-width", "100%", "important");
-                parent.style.setProperty("margin-left", "0", "important");
-                parent.style.setProperty("margin-right", "0", "important");
-                parent.style.setProperty("padding", "0", "important");
-                parent.style.setProperty("overflow", "visible", "important");
-              }
             });
             doc.querySelectorAll(".sim-step-section-marker").forEach((marker) => {
               const row = marker.closest('[data-testid="stElementContainer"]');
@@ -3587,26 +3714,12 @@ def inject_paint_js() -> None:
               row.style.setProperty("gap", "16px", "important");
               row.style.setProperty("width", "100%", "important");
             });
-            doc.querySelectorAll('[data-testid="stHorizontalBlock"]:has(.sim-ctx-marker) > [data-testid="column"]:last-child').forEach((col) => {
-              col.style.setProperty("display", "flex", "important");
-              col.style.setProperty("justify-content", "flex-end", "important");
-              col.style.setProperty("align-items", "center", "important");
-              col.style.setProperty("align-self", "center", "important");
-              col.style.setProperty("margin-left", "auto", "important");
-              const vb = col.querySelector(':scope > [data-testid="stVerticalBlock"]');
-              if (vb) {
-                vb.style.setProperty("display", "flex", "important");
-                vb.style.setProperty("justify-content", "flex-end", "important");
-                vb.style.setProperty("align-items", "center", "important");
-                vb.style.setProperty("width", "100%", "important");
-              }
-            });
             doc.querySelectorAll(".sim-ctx-live").forEach((chip) => {
               chip.style.setProperty("display", "inline-flex", "important");
               chip.style.setProperty("align-items", "center", "important");
               chip.style.setProperty("gap", "8px", "important");
               chip.style.setProperty("padding", "0 14px", "important");
-              chip.style.setProperty("margin-left", "auto", "important");
+              chip.style.setProperty("margin", "0", "important");
               chip.style.setProperty("background", white, "important");
               chip.style.setProperty("background-color", white, "important");
               chip.style.setProperty("border", "1px solid #e4eaf2", "important");
@@ -3758,7 +3871,7 @@ _SIDE_GAP_GEN_KEY = "sim_side_gap_gen"
 _STATUS_LABELS = (
     ("DD% (4 fields)", 0),
     ("Inflation (6 fields)", 1),
-    ("Process cost", 2),
+    ("Project Cost", 2),
 )
 
 
@@ -3784,6 +3897,34 @@ def _field_display_str(field: dict[str, Any], value: Any) -> str:
     return f"{float(value):.1f}"
 
 
+def _sanitize_int_input_text(raw: str) -> str:
+    return re.sub(r"\D", "", raw or "")
+
+
+def _sanitize_decimal_input_text(raw: str) -> str:
+    text = (raw or "").replace(",", "")
+    if not text:
+        return ""
+    out: list[str] = []
+    has_dot = False
+    for ch in text:
+        if ch == "-" and not out:
+            out.append(ch)
+        elif ch == "." and not has_dot:
+            out.append(ch)
+            has_dot = True
+        elif ch.isdigit():
+            out.append(ch)
+    return "".join(out)
+
+
+def _apply_sanitized_widget_text(key: str, sanitize_fn) -> None:
+    raw = st.session_state.get(key, "")
+    clean = sanitize_fn(str(raw))
+    if clean != str(raw):
+        st.session_state[key] = clean
+
+
 def _parse_field_text(field: dict[str, Any], raw: str) -> int | float | None:
     text = (raw or "").strip().replace("%", "")
     if not text:
@@ -3802,7 +3943,8 @@ def _parse_field_text(field: dict[str, Any], raw: str) -> int | float | None:
 _FIELD_WIDGET_VERSION = 9
 _DELIVERY_MIX_TITLE = "Direct Delivery"
 _INFLATION_RATES_TITLE = "Inflation Rates"
-_PROCESS_COST_TITLES = frozenset({"Process cost", "Project Costs (EUR)"})
+_PROCESS_COST_TITLE = "Project Cost"
+_PROCESS_COST_TITLES = frozenset({"Project Cost", "Process cost", "Project Costs (EUR)"})
 _PC_TOTAL_SIDEBAR_LABELS = {
     "PTC": "PTC Total",
     "STC": "STC Total",
@@ -3831,6 +3973,8 @@ def _ensure_field_text_state(key: str, field: dict[str, Any]) -> None:
         st.session_state[key] = _field_display_str(field, field["value"])
     elif isinstance(st.session_state[key], (int, float)):
         st.session_state[key] = _field_display_str(field, st.session_state[key])
+    if _field_is_int(field):
+        _apply_sanitized_widget_text(key, _sanitize_int_input_text)
 
 
 def _infl_draft_key(group_index: int, row_key: str, col: int) -> str:
@@ -3875,6 +4019,7 @@ def _infl_matrix_persist_value(group_index: int, row_key: str, col: int) -> floa
 
 def _sync_infl_draft_cell(group_index: int, row_key: str, col: int) -> None:
     key = _infl_matrix_key(group_index, row_key, col)
+    _apply_sanitized_widget_text(key, _sanitize_decimal_input_text)
     draft_key = _infl_draft_key(group_index, row_key, col)
     default = _infl_matrix_default(row_key, col)
     raw = st.session_state.get(key, "")
@@ -3970,6 +4115,7 @@ def _sync_dm_field_staged(
 ) -> None:
     """Keep non-widget staging keys in sync while the user edits DD%."""
     key = _field_key(group_index, field_index)
+    _apply_sanitized_widget_text(key, _sanitize_int_input_text)
     parsed = _parse_field_text(field, str(st.session_state.get(key, "")))
     if parsed is None:
         return
@@ -4352,6 +4498,8 @@ def _pc_matrix_persist_value(group_index: int, row_key: str, col: int) -> int:
 
 
 def _sync_pc_draft_cell(group_index: int, row_key: str, col: int) -> None:
+    key = _pc_matrix_key(group_index, row_key, col)
+    _apply_sanitized_widget_text(key, _sanitize_int_input_text)
     draft_key = _pc_draft_key(group_index, row_key, col)
     default = _pc_matrix_default(row_key, col)
     st.session_state[draft_key] = _pc_display_str(
@@ -5358,10 +5506,16 @@ def render_parameter_panel_header(data: dict[str, Any], groups: list[dict[str, A
                     if active_level:
                         value_spec = _planning_level_spec(active_level)
                         assert value_spec is not None
+                        country_map = (
+                            db_st.get_country_option_map()
+                            if value_spec["key"] == _PANEL_COUNTRY_KEY
+                            else None
+                        )
                         filter_select(
                             value_spec["label"],
                             value_spec["key"],
-                            preset=value_spec["preset"],
+                            preset=value_spec.get("preset"),
+                            option_map=country_map,
                             parent=select_dd,
                             panel_header=True,
                             label_above=f"Select {value_spec['label']}",
@@ -6244,30 +6398,7 @@ def _render_pc_matrix_input_table(group_index: int, *, locked: bool) -> None:
             _render_pc_chip_html(_pc_display_str(totals[col_idx]), total=True)
 
     if not locked:
-        calc = _process_cost_calc_state(group_index)
-        share_values = [
-            float(row.get("share_pct", 0.0))
-            for row in calc.get("column_shares") or []
-        ]
-        if len(share_values) < len(columns):
-            share_values.extend([0.0] * (len(columns) - len(share_values)))
-        cols = st.columns(_pc_matrix_column_weights(len(columns)), gap="small", vertical_alignment="center")
-        with cols[0]:
-            st.markdown('<span class="sim-pc-share-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="sim-pc-company-label" aria-hidden="true"><span>&nbsp;</span></div>',
-                unsafe_allow_html=True,
-            )
-        with cols[1]:
-            st.markdown(
-                f'<div class="sim-pc-category-label sim-pc-share-label" '
-                f'style="min-height:{_PC_TOTAL_ROW_H};display:flex;align-items:center;">'
-                f"<span>Share %</span></div>",
-                unsafe_allow_html=True,
-            )
-        for col_idx, col_widget in enumerate(cols[2:]):
-            with col_widget:
-                _render_pc_chip_html(_format_share_pct(share_values[col_idx]), share=True)
+        _process_cost_calc_state(group_index)
 
 
 def _render_pc_plc_impact_table(calc: dict[str, Any]) -> None:
@@ -6535,7 +6666,6 @@ def render_action_bar(
     prog = _compute_progress(groups)
     pct = float(prog.get("pct", 0))
     count = html.escape(prog["count"])
-    st.markdown('<hr class="sim-row-divider sim-footer-divider" aria-hidden="true" />', unsafe_allow_html=True)
     try:
         footer = st.container(key="sim_footer")
     except TypeError:
@@ -6872,7 +7002,7 @@ def render_process_cost_totals_card(
         f"""
         <div style="display:flex;justify-content:space-between;align-items:center;
             padding:{_SUBMIT_SECTION_PAD};border-bottom:1px solid #eef2f7;background:{_INPUT_BG};">
-          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">Process Costs</span>
+          <span style="font-size:14px;font-weight:700;color:{_PRIMARY};">Project Cost</span>
         </div>
         {_process_cost_totals_rows_html(rows)}
         """,

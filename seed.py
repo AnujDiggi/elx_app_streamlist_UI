@@ -189,6 +189,38 @@ COUNTRIES = [
     {"flag": "🇵🇹", "code": "PT10", "name": "Portugal", "pct": 0,   "bar_class": "zero",    "bar_width": 2,   "status": "danger"},
 ]
 
+# Country dropdown — country_cd stored as value, country_short_nm shown in UI.
+COUNTRY_LOOKUP = [
+    {"country_cd": "NO", "country_short_nm": "Norway"},
+    {"country_cd": "LT", "country_short_nm": "Lithuania"},
+    {"country_cd": "HU", "country_short_nm": "Hungary"},
+    {"country_cd": "LU", "country_short_nm": "Luxembourg"},
+    {"country_cd": "SE", "country_short_nm": "Sweden"},
+    {"country_cd": "IE", "country_short_nm": "Ireland"},
+    {"country_cd": "PL", "country_short_nm": "Poland"},
+    {"country_cd": "HR", "country_short_nm": "Croatia"},
+    {"country_cd": "DE", "country_short_nm": "Germany"},
+    {"country_cd": "FR", "country_short_nm": "France"},
+    {"country_cd": "TR", "country_short_nm": "Türkiye"},
+    {"country_cd": "NL", "country_short_nm": "Netherlands"},
+    {"country_cd": "GB", "country_short_nm": "United Kingdom"},
+    {"country_cd": "EE", "country_short_nm": "Estonia"},
+    {"country_cd": "CZ", "country_short_nm": "Czech Republic"},
+    {"country_cd": "DK", "country_short_nm": "Denmark"},
+    {"country_cd": "GR", "country_short_nm": "Greece"},
+    {"country_cd": "FI", "country_short_nm": "Finland"},
+    {"country_cd": "PT", "country_short_nm": "Portugal"},
+    {"country_cd": "LV", "country_short_nm": "Latvia"},
+    {"country_cd": "ES", "country_short_nm": "Spain"},
+    {"country_cd": "RO", "country_short_nm": "Romania"},
+    {"country_cd": "BE", "country_short_nm": "Belgium"},
+    {"country_cd": "UA", "country_short_nm": "Ukraine"},
+    {"country_cd": "SK", "country_short_nm": "Slovakia"},
+    {"country_cd": "IT", "country_short_nm": "Italy"},
+    {"country_cd": "CH", "country_short_nm": "Switzerland"},
+    {"country_cd": "AT", "country_short_nm": "Austria"},
+]
+
 DEADLINES = [
     {"day": "24", "month": "MAY", "title": "PT10 submission — not started", "meta": "EA1 2026 · BC04", "urgent": True,  "chip": "3 days",  "chip_class": ""},
     {"day": "12", "month": "MAY", "title": "ES10 mid-cycle review",         "meta": "EA1 2026 · BC04", "urgent": True,  "chip": "3 days",  "chip_class": ""},
@@ -221,10 +253,10 @@ SIMULATE_META = {
 }
 
 SIMULATE_CONTEXT = [
-    {"key": "Area",     "value": "FR10"},
-    {"key": "Period",   "value": "Jan"},
-    {"key": "FADP",     "value": "BC04"},
-    {"key": "Scenario", "value": "Base Case"},
+    {"key": "Area",     "value": ""},
+    {"key": "Period",   "value": ""},
+    {"key": "FADP",     "value": ""},
+    {"key": "Scenario", "value": ""},
 ]
 
 SIMULATE_STEPS = [
@@ -374,7 +406,7 @@ SIMULATE_PARAM_GROUPS = [
     },
     {
         "icon": "💼",
-        "title": "Process cost",
+        "title": "Project Cost",
         "description": "One-time and planned initiative costs for this planning cycle",
         "expanded": False,
         "tags": [
@@ -403,7 +435,7 @@ SIMULATE_IMPACT_ROWS = [
 SIMULATE_STATUS_ROWS = [
     {"name": "DD% (4 fields)",        "pill": "done",    "pill_text": "Done"},
     {"name": "Inflation (6 fields)", "pill": "done",    "pill_text": "Done"},
-    {"name": "Process cost",         "pill": "partial", "pill_text": "0 / 14"},
+    {"name": "Project Cost",         "pill": "partial", "pill_text": "0 / 14"},
 ]
 
 SIMULATE_CTX_ROWS = [
@@ -484,6 +516,10 @@ def seed() -> None:
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [(c["flag"], c["code"], c["name"], c["pct"], c["bar_class"], c["bar_width"], c["status"], i)
              for i, c in enumerate(COUNTRIES)],
+        )
+        conn.executemany(
+            "INSERT INTO country_lookup (country_cd, country_short_nm, sort_order) VALUES (?, ?, ?)",
+            [(c["country_cd"], c["country_short_nm"], i) for i, c in enumerate(COUNTRY_LOOKUP)],
         )
         conn.executemany(
             'INSERT INTO deadlines (day, month, title, "meta", urgent, chip, chip_class, sort_order)'
@@ -576,6 +612,7 @@ def seed() -> None:
         f"Seeded {DB_PATH.name}: "
         f"{len(USERS)} users, {len(DASHBOARD_KPIS)} kpis, "
         f"{len(DASHBOARD_TABLE_ROWS)} table rows, {len(COUNTRIES)} countries, "
+        f"{len(COUNTRY_LOOKUP)} country lookup rows, "
         f"{len(DEADLINES)} deadlines, {len(ACTIVITIES)} activities, "
         f"{len(SIMULATE_PARAM_GROUPS)} param groups, "
         f"{sum(len(g['fields']) for g in SIMULATE_PARAM_GROUPS)} param fields."

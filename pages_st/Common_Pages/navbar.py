@@ -691,7 +691,11 @@ def _navbar_css(active_key: str | None) -> str:
         padding-bottom: 0 !important;
     }}
     [data-testid="stElementContainer"]:has(#navbar-bar-marker)
+        + [data-testid="stElementContainer"]:has(.sim-ctx-outer-marker),
+    [data-testid="stElementContainer"]:has(#navbar-bar-marker)
         + [data-testid="stElementContainer"]:has(.sim-ctx-marker),
+    [data-testid="stElementContainer"]:has(#navbar-bar-marker)
+        + [data-testid="stElementContainer"]:has([data-testid="stHorizontalBlock"]:has(.sim-ctx-outer-marker)),
     [data-testid="stElementContainer"]:has(#navbar-bar-marker)
         + [data-testid="stElementContainer"]:has([data-testid="stHorizontalBlock"]:has(.sim-ctx-marker)),
     [data-testid="stElementContainer"]:has(#navbar-bar-marker)

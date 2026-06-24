@@ -110,6 +110,27 @@ def _load_filter_bar_rows() -> tuple[list[dict], list[dict]]:
     return filters, sliders
 
 
+def get_country_lookup() -> list[dict[str, str]]:
+    """Country dropdown rows — country_cd is the stored id, country_short_nm is the label."""
+    return [
+        {"country_cd": r["country_cd"], "country_short_nm": r["country_short_nm"]}
+        for r in _rows(
+            "SELECT country_cd, country_short_nm FROM country_lookup ORDER BY sort_order"
+        )
+    ]
+
+
+@st.cache_data
+def get_country_option_map() -> dict[str, str]:
+    """Map country_cd → country_short_nm for selectbox format_func."""
+    return {r["country_cd"]: r["country_short_nm"] for r in get_country_lookup()}
+
+
+def country_display_name(country_cd: str) -> str:
+    """Resolve a country code to its display name."""
+    return get_country_option_map().get(country_cd, country_cd)
+
+
 def get_dashboard_data(user_name: str) -> dict:
     meta = _one_required(
         "SELECT live_label, hero_tag, hero_title, hero_sub FROM dashboard_meta WHERE id = 1"
@@ -203,11 +224,12 @@ def get_dashboard_data(user_name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _SIM_GROUPS_WITHOUT_FIELD_DESC = frozenset({
-    "Delivery Mix", "Direct Delivery", "Inflation Rates", "Process cost", "Project Costs (EUR)",
+    "Delivery Mix", "Direct Delivery", "Inflation Rates", "Process cost", "Project Cost", "Project Costs (EUR)",
 })
 _SIM_EXCLUDED_GROUPS = frozenset({"Warehouse Costs (SWC)"})
 _SIM_GROUP_TITLE_ALIASES = {
-    "Project Costs (EUR)": "Process cost",
+    "Project Costs (EUR)": "Project Cost",
+    "Process cost": "Project Cost",
     "Delivery Mix": "Direct Delivery",
 }
 _DIRECT_DELIVERY_DB_TITLES = frozenset({"Delivery Mix", "Direct Delivery"})
@@ -238,7 +260,7 @@ def _delivery_mix_fields() -> list[dict]:
     ]
 
 
-_PROCESS_COST_DB_TITLES = frozenset({"Process cost", "Project Costs (EUR)"})
+_PROCESS_COST_DB_TITLES = frozenset({"Process cost", "Project Cost", "Project Costs (EUR)"})
 _PROCESS_COST_COLUMNS: tuple[str, ...] = (
     "PTC",
     "STC",

@@ -107,6 +107,12 @@ CREATE TABLE countries (
     sort_order INTEGER NOT NULL
 );
 
+CREATE TABLE country_lookup (
+    country_cd       TEXT PRIMARY KEY,
+    country_short_nm TEXT NOT NULL,
+    sort_order       INTEGER NOT NULL
+);
+
 CREATE TABLE deadlines (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     day        TEXT,
